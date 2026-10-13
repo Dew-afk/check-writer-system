@@ -128,3 +128,19 @@ export function amountToWords(
       return wording;
   }
 }
+
+/**
+ * UI-safe wrapper: returns null instead of throwing when the amount is out
+ * of range, so dialogs and previews can show a friendly message instead of
+ * crashing the render.
+ */
+export function safeAmountToWords(
+  amount: number,
+  options: AmountToWordsOptions = {},
+): string | null {
+  try {
+    return amountToWords(amount, options);
+  } catch {
+    return null;
+  }
+}

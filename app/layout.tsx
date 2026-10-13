@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { DraftProvider } from "@/components/DraftProvider";
 
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
@@ -44,7 +45,7 @@ export default function RootLayout({
     >
       <body className="antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
-        {children}
+        <DraftProvider>{children}</DraftProvider>
       </body>
     </html>
   );

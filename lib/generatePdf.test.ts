@@ -3,9 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import { BANK_TEMPLATES } from "./banks";
 import {
+  DEFAULT_PRINT_LAYOUT,
+  paperPageMm,
+  placeChequeOnPage,
+  rotatedChequeSize,
+  sanitizePrintLayout,
+  type PrintLayout,
+} from "./printLayout";
+import {
   formatAmountNum,
   generateChequePdf,
   generateChequePdfA4,
+  generatePdf,
   generateTestGridPdf,
   wrapText,
 } from "./generatePdf";
@@ -138,7 +147,7 @@ describe("generateChequePdfA4", () => {
 describe("generateTestGridPdf", () => {
   it("produces a cheque-size ruler grid for every bank", async () => {
     for (const template of Object.values(BANK_TEMPLATES)) {
-      const bytes = await generateTestGridPdf(template.id);
+      const bytes = await generateTestGridPdf(template.id, { ...DEFAULT_PRINT_LAYOUT, paperPreset: "cheque" });
       const doc = await PDFDocument.load(bytes);
       const [page] = doc.getPages();
       expect(page.getWidth()).toBeCloseTo(template.widthMm * MM_TO_PT);
@@ -158,5 +167,94 @@ describe("customFields printing", () => {
     });
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBe(1);
+  });
+});
+
+describe("unified PrintLayout pipeline (Fix 2)", () => {
+  const presets = ["a4", "letter", "legal", "folio", "a5", "cheque"] as const;
+  const orientations = ["portrait", "landscape"] as const;
+  const rotations = [0, 90, 180, 270] as const;
+
+  it("produces a valid PDF for every paper x orientation x rotation", async () => {
+    // Page geometry is bank-independent — the cheque content is native-size.
+    for (const paperPreset of presets) {
+        for (const orientation of orientations) {
+          for (const contentRotation of rotations) {
+            const layout: PrintLayout = {
+              ...DEFAULT_PRINT_LAYOUT,
+              paperPreset,
+              orientation,
+              contentRotation,
+            };
+            const bytes = await generatePdf(fullPayload, layout);
+            const head = new TextDecoder().decode(bytes.slice(0, 5));
+            expect(head).toBe("%PDF-");
+            const doc = await PDFDocument.load(bytes);
+            const [page] = doc.getPages();
+            const paper = paperPageMm(layout);
+            expect(page.getWidth()).toBeCloseTo(paper.widthMm * MM_TO_PT, 1);
+            expect(page.getHeight()).toBeCloseTo(paper.heightMm * MM_TO_PT, 1);
+          }
+        }
+      }
+  });
+
+  it("places the cheque inside the page when the fit check passes", async () => {
+    for (const paperPreset of presets) {
+      for (const contentRotation of rotations) {
+        const layout: PrintLayout = {
+          ...DEFAULT_PRINT_LAYOUT,
+          paperPreset,
+          contentRotation,
+        };
+        const paper = paperPageMm(layout);
+        const placed = placeChequeOnPage(layout, paper);
+        if (placed.fits) {
+          expect(placed.xMm).toBeGreaterThanOrEqual(0);
+          expect(placed.yMm).toBeGreaterThanOrEqual(0);
+          expect(placed.xMm + placed.widthMm).toBeLessThanOrEqual(paper.widthMm + 0.01);
+          expect(placed.yMm + placed.heightMm).toBeLessThanOrEqual(paper.heightMm + 0.01);
+        }
+      }
+    }
+  });
+
+  it("rotates the cheque footprint for 90/270 content rotations", () => {
+    expect(rotatedChequeSize(0)).toEqual({ widthMm: 203.2, heightMm: 76.2 });
+    expect(rotatedChequeSize(90)).toEqual({ widthMm: 76.2, heightMm: 203.2 });
+    expect(rotatedChequeSize(270).widthMm).toBe(76.2);
+    expect(rotatedChequeSize(180).widthMm).toBe(203.2);
+  });
+
+  it("sanitizes stored layouts and rejects bad ones", () => {
+    expect(sanitizePrintLayout(DEFAULT_PRINT_LAYOUT)).toEqual(DEFAULT_PRINT_LAYOUT);
+    expect(sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT, orientation: "sideways" })).toEqual(
+      { ...DEFAULT_PRINT_LAYOUT, orientation: "portrait" },
+    );
+    expect(sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT, paperPreset: "nope" })).toBeNull();
+    expect(sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT, contentRotation: 45 })).toBeNull();
+    expect(
+      sanitizePrintLayout({
+        ...DEFAULT_PRINT_LAYOUT,
+        paperPreset: "custom",
+        customWidthMm: 300,
+        customHeightMm: 120,
+      }),
+    ).toMatchObject({ paperPreset: "custom", customWidthMm: 300, customHeightMm: 120 });
+  });
+
+  it("test grids are valid for every bank/paper/orientation", async () => {
+    for (const template of Object.values(BANK_TEMPLATES)) {
+      for (const paperPreset of ["a4", "letter", "cheque"] as const) {
+        for (const orientation of orientations) {
+          const bytes = await generateTestGridPdf(template.id, {
+            ...DEFAULT_PRINT_LAYOUT,
+            paperPreset,
+            orientation,
+          });
+          expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
+        }
+      }
+    }
   });
 });

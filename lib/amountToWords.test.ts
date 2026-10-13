@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_AMOUNT, amountToWords } from './amountToWords';
+import { MAX_AMOUNT, amountToWords, safeAmountToWords } from './amountToWords';
 
 describe('amountToWords', () => {
   describe('basic amounts', () => {
@@ -172,5 +172,20 @@ describe('omitZeroCentavos option', () => {
         suffixOnly: false,
       }),
     ).toBe('one hundred pesos');
+  });
+});
+
+describe('safeAmountToWords (UI-safe wrapper)', () => {
+  it('returns wording for valid amounts', () => {
+    expect(safeAmountToWords(1234.5)).toBe(
+      'One Thousand Two Hundred Thirty-Four Pesos and 50/100 Only',
+    );
+  });
+
+  it('returns null instead of throwing for out-of-range amounts', () => {
+    expect(safeAmountToWords(1200000002.5)).toBeNull();
+    expect(safeAmountToWords(-5)).toBeNull();
+    expect(safeAmountToWords(NaN)).toBeNull();
+    expect(safeAmountToWords(Infinity)).toBeNull();
   });
 });

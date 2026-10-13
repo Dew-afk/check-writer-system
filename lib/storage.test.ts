@@ -27,6 +27,8 @@ describe('parseBackupJson', () => {
         dateSpacing: {},
         customFields: {},
         savedNames: [],
+        wordsWidthOverrides: {},
+        printLayouts: {},
       });
     }
   });
@@ -212,6 +214,8 @@ describe('field layout persistence (localStorage mock)', () => {
       dateSpacing: {},
       customFields: {},
       savedNames: [],
+      wordsWidthOverrides: {},
+      printLayouts: {},
     });
   });
 

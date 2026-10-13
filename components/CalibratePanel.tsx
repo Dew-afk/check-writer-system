@@ -9,10 +9,13 @@ import {
   getFieldOverrides,
   getLastBank,
   getOffset as loadOffset,
+  getPrintLayout,
   setOffset as saveOffset,
   type Offset,
 } from "@/lib/storage";
 import ChequeCanvas from "@/components/ChequeCanvas";
+import PdfDialog from "@/components/PdfDialog";
+import { DEFAULT_PRINT_LAYOUT, type PrintLayout } from "@/lib/printLayout";
 import SystemShell from "@/components/SystemShell";
 import { useChequeImage } from "@/hooks/useChequeImage";
 import { Button } from "@/components/ui/button";
@@ -38,6 +41,9 @@ export default function CalibratePanel() {
   const [fieldOverrides, setFieldOverrides] = useState<FieldOverrides>({});
   const [printing, setPrinting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [printLayout, setPrintLayout] = useState<PrintLayout>(DEFAULT_PRINT_LAYOUT);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -55,12 +61,14 @@ export default function CalibratePanel() {
     setBankId(initialBank);
     setOffsetState(loadOffset(initialBank));
     setFieldOverrides(getFieldOverrides(initialBank));
+    setPrintLayout(getPrintLayout(initialBank));
   }, []);
 
   function handleBankChange(next: BankId) {
     setBankId(next);
     setOffsetState(loadOffset(next));
     setFieldOverrides(getFieldOverrides(next));
+    setPrintLayout(getPrintLayout(next));
   }
 
   function handleOffsetChange(axis: keyof Offset, value: number) {
@@ -80,13 +88,21 @@ export default function CalibratePanel() {
     try {
       // Dynamic import keeps pdf-lib out of the initial page bundle.
       const { generateTestGridPdf } = await import("@/lib/generatePdf");
-      const bytes = await generateTestGridPdf(bankId);
+      const bytes = await generateTestGridPdf(bankId, printLayout);
       const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch {
-      setStatus("Could not generate the test grid.");
+      // In-page dialog, never window.open after async (popup blockers).
+      setPdfUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+      setPdfOpen(true);
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? `Could not generate the test grid: ${error.message}`
+          : "Could not generate the test grid.",
+      );
     } finally {
       setPrinting(false);
     }
@@ -268,6 +284,21 @@ export default function CalibratePanel() {
           </p>
         </div>
       </SystemShell>
+
+      <PdfDialog
+        open={pdfOpen}
+        onOpenChange={setPdfOpen}
+        url={pdfUrl}
+        title="Test Grid"
+        description="Print on plain paper, then hold your cheque against the grid. Uses your Print Setup layout."
+        onDownload={() => {
+          if (!pdfUrl) return;
+          const link = document.createElement("a");
+          link.href = pdfUrl;
+          link.download = "cheque-test-grid.pdf";
+          link.click();
+        }}
+      />
     </>
   );
 }

@@ -22,6 +22,11 @@ import {
   sanitizeSavedNames,
   type CustomTextField,
 } from './customFields';
+import {
+  DEFAULT_PRINT_LAYOUT,
+  sanitizePrintLayout,
+  type PrintLayout,
+} from './printLayout';
 
 /**
  * Local-only storage: payees, last-used bank, per-bank printer offsets, and
@@ -54,6 +59,10 @@ export interface StoredState {
   customFields: Partial<Record<BankId, CustomTextField[]>>;
   /** Remembered custom-label texts, reusable when editing instances. */
   savedNames: string[];
+  /** Per-bank override of the amount-words line width (mm). */
+  wordsWidthOverrides: Partial<Record<BankId, number>>;
+  /** Per-bank print layout (paper, orientation, rotation, anchor). */
+  printLayouts: Partial<Record<BankId, PrintLayout>>;
 }
 
 const STORAGE_KEY = 'ph-cheque-writer:v1';
@@ -130,6 +139,31 @@ const storedStateSchema = z.object({
       return out;
     }),
   savedNames: z.unknown().catch([]).transform((raw) => sanitizeSavedNames(raw)),
+  wordsWidthOverrides: z
+    .record(z.string(), z.unknown())
+    .catch({})
+    .transform((raw) => {
+      const out: Partial<Record<BankId, number>> = {};
+      for (const [bankKey, value] of Object.entries(raw)) {
+        if (!bankIdSchema.safeParse(bankKey).success) continue;
+        if (typeof value !== "number" || !Number.isFinite(value)) continue;
+        if (value < 20 || value > 203.2) continue;
+        out[bankKey as BankId] = Math.round(value * 10) / 10;
+      }
+      return out;
+    }),
+  printLayouts: z
+    .record(z.string(), z.unknown())
+    .catch({})
+    .transform((raw) => {
+      const out: Partial<Record<BankId, PrintLayout>> = {};
+      for (const [bankKey, value] of Object.entries(raw)) {
+        if (!bankIdSchema.safeParse(bankKey).success) continue;
+        const layout = sanitizePrintLayout(value);
+        if (layout) out[bankKey as BankId] = layout;
+      }
+      return out;
+    }),
 });
 
 /** Accepts v1 backups (without or with loose layouts) and current v2 files. */
@@ -147,6 +181,8 @@ const DEFAULT_STATE: StoredState = {
   dateSpacing: {},
   customFields: {},
   savedNames: [],
+  wordsWidthOverrides: {},
+  printLayouts: {},
 };
 
 function getLocalStorage(): Storage | null {
@@ -313,6 +349,35 @@ export function clearAllFieldOverrides(): boolean {
   return saveStoredState({ ...state, fieldOverrides: {} });
 }
 
+/** Per-bank print layout (falls back to the default A4 portrait). */
+export function getPrintLayout(bankId: BankId): PrintLayout {
+  return loadStoredState().printLayouts[bankId] ?? DEFAULT_PRINT_LAYOUT;
+}
+
+export function savePrintLayout(bankId: BankId, layout: PrintLayout): boolean {
+  const state = loadStoredState();
+  const clean = sanitizePrintLayout(layout);
+  if (!clean) return false;
+  return saveStoredState({
+    ...state,
+    printLayouts: { ...state.printLayouts, [bankId]: clean },
+  });
+}
+
+/** Per-bank amount-words line width override (mm), or undefined. */
+export function getWordsMaxWidth(bankId: BankId): number | undefined {
+  return loadStoredState().wordsWidthOverrides[bankId];
+}
+
+export function saveWordsMaxWidth(bankId: BankId, mm: number): boolean {
+  const state = loadStoredState();
+  const clamped = Math.min(203.2, Math.max(20, Math.round(mm * 10) / 10));
+  return saveStoredState({
+    ...state,
+    wordsWidthOverrides: { ...state.wordsWidthOverrides, [bankId]: clamped },
+  });
+}
+
 /** Custom text labels (Name fields) for one bank. */
 export function getCustomFields(bankId: BankId): CustomTextField[] {
   return sanitizeCustomFields(loadStoredState().customFields[bankId] ?? []);
@@ -375,8 +440,8 @@ export function parseBackupJson(text: string): BackupParseResult {
       error: 'The file is not a valid PH Cheque Writer backup.',
     };
   }
-  const { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames } = result.data;
-  return { ok: true, data: { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames } };
+  const { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts } = result.data;
+  return { ok: true, data: { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts } };
 }
 
 export type ImportResult =

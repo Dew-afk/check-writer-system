@@ -19,6 +19,13 @@ import {
   type DateSpacing,
 } from "./dateSpacing";
 import type { CustomTextField } from "./customFields";
+import { layoutAmountWords } from "./layoutAmountWords";
+import {
+  DEFAULT_PRINT_LAYOUT,
+  paperPageMm,
+  placeChequeOnPage,
+  type PrintLayout,
+} from "./printLayout";
 import type { Offset } from "./storage";
 
 /**
@@ -29,11 +36,6 @@ import type { Offset } from "./storage";
  */
 
 const MM_TO_PT = 72 / 25.4;
-const A4_WIDTH_MM = 210;
-const A4_HEIGHT_MM = 297;
-/** Where the cheque sits on an A4 carrier sheet. */
-export const A4_CHEQUE_ORIGIN_MM: Offset = { x: 12, y: 12 };
-
 export interface ChequePrintPayload {
   bankId: BankId;
   date?: string; // ISO "YYYY-MM-DD"
@@ -48,6 +50,8 @@ export interface ChequePrintPayload {
   dateSpacing?: DateSpacing;
   /** Multi-instance custom text labels, drawn on top of the built-ins. */
   customFields?: CustomTextField[];
+  /** Per-bank override of the amount-words line width (mm). */
+  wordsMaxWidthMm?: number;
   /** User calibration offset in mm (per bank). */
   offset?: Offset;
   /** Per-field position overrides set by dragging on the canvas (mm). */
@@ -265,21 +269,28 @@ function drawCheque(
       suffixOnly: payload.suffixOnly,
       omitZeroCentavos: payload.omitZeroCentavos,
     });
-    const lines = wrapText(
-      words,
+    // Single source of truth: same layout module as the canvas overlay.
+    const layout = layoutAmountWords({
+      text: words,
       font,
-      fields.amountWords.fontSize,
-      fields.amountWords.maxWidth,
-      fields.amountWords.lines,
-    );
-    lines.forEach((line, i) => {
+      baseFontSize: fields.amountWords.fontSize,
+      maxWidthMm:
+        payload.wordsMaxWidthMm ?? fields.amountWords.maxWidth,
+      line2MaxWidthMm:
+        payload.wordsMaxWidthMm ?? fields.amountWords.line2?.maxWidth,
+    });
+    layout.lines.forEach((line, i) => {
+      const target = i === 0 ? wordsPos : {
+        x: fields.amountWords.line2?.x ?? wordsPos.x,
+        y: fields.amountWords.line2?.y ?? wordsPos.y + fields.amountWords.lineHeight,
+      };
       drawText({
         page,
         font,
         text: line,
-        xMm: wordsPos.x,
-        yMm: wordsPos.y + i * fields.amountWords.lineHeight,
-        fontSize: fields.amountWords.fontSize,
+        xMm: target.x,
+        yMm: target.y,
+        fontSize: layout.fontSize,
         originMm,
         pageHeightPt,
       });
@@ -324,12 +335,12 @@ function drawCheque(
 }
 
 /**
- * Generates a cheque-size PDF (the page is exactly the cheque dimensions).
- * Print at 100% / Actual Size with margins None.
+ * Builds the cheque content on a native cheque-size page (mm coordinates,
+ * untouched by paper settings) and returns that document.
  */
-export async function generateChequePdf(
+async function buildChequeDocument(
   payload: ChequePrintPayload,
-): Promise<Uint8Array> {
+): Promise<PDFDocument> {
   const template = BANK_TEMPLATES[payload.bankId];
   const doc = await PDFDocument.create();
   const page = doc.addPage([
@@ -340,48 +351,95 @@ export async function generateChequePdf(
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const courier = await doc.embedFont(StandardFonts.Courier);
   drawCheque(page, font, bold, courier, payload, payload.offset ?? { x: 0, y: 0 });
+  return doc;
+}
+
+/** Places an embedded cheque document on a carrier page per the layout. */
+async function placeOnCarrier(
+  chequeDoc: PDFDocument,
+  layout: PrintLayout,
+  outline = true,
+): Promise<Uint8Array> {
+  const paper = paperPageMm(layout);
+  const placed = placeChequeOnPage(layout, paper);
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([
+    paper.widthMm * MM_TO_PT,
+    paper.heightMm * MM_TO_PT,
+  ]);
+  const [embedded] = await doc.embedPdf(chequeDoc);
+  page.drawPage(embedded, {
+    x: placed.xMm * MM_TO_PT,
+    y: paper.heightMm * MM_TO_PT - (placed.yMm + placed.heightMm) * MM_TO_PT,
+    width: embedded.width,
+    height: embedded.height,
+    rotate: degrees(layout.contentRotation),
+  });
+  if (outline) {
+    // Light gray outline of the cheque area to help alignment on carrier sheets.
+    page.drawRectangle({
+      x: placed.xMm * MM_TO_PT,
+      y: paper.heightMm * MM_TO_PT - (placed.yMm + placed.heightMm) * MM_TO_PT,
+      width: placed.widthMm * MM_TO_PT,
+      height: placed.heightMm * MM_TO_PT,
+      borderColor: rgb(0.55, 0.6, 0.65),
+      borderWidth: 0.5,
+    });
+  }
   return doc.save();
 }
 
 /**
- * Generates a full A4 page with the cheque drawn at A4_CHEQUE_ORIGIN_MM
- * (plus the user's calibration offset) and a light outline around the cheque
- * area — for printers that can't feed cheque-size paper directly.
+ * THE unified generator (Fix 2): the cheque is always drawn in its native mm
+ * space, then placed on the chosen paper with the preset/orientation/
+ * rotation/anchor settings. Default layout is A4 portrait, cheque centered.
+ */
+export async function generatePdf(
+  payload: ChequePrintPayload,
+  layout: PrintLayout = DEFAULT_PRINT_LAYOUT,
+): Promise<Uint8Array> {
+  const chequeDoc = await buildChequeDocument(payload);
+  if (layout.paperPreset === "cheque") return chequeDoc.save();
+  return placeOnCarrier(chequeDoc, layout);
+}
+
+/**
+ * Cheque-size PDF (the page is exactly the cheque dimensions) — kept as a
+ * convenience wrapper for the "cheque" preset.
+ */
+export async function generateChequePdf(
+  payload: ChequePrintPayload,
+): Promise<Uint8Array> {
+  return generatePdf(payload, {
+    ...DEFAULT_PRINT_LAYOUT,
+    paperPreset: "cheque",
+  });
+}
+
+/**
+ * A4 carrier sheet at the legacy 12,12mm origin — kept as a wrapper.
  */
 export async function generateChequePdfA4(
   payload: ChequePrintPayload,
 ): Promise<Uint8Array> {
-  const template = BANK_TEMPLATES[payload.bankId];
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([A4_WIDTH_MM * MM_TO_PT, A4_HEIGHT_MM * MM_TO_PT]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const courier = await doc.embedFont(StandardFonts.Courier);
-  const offset = payload.offset ?? { x: 0, y: 0 };
-  const origin = {
-    x: A4_CHEQUE_ORIGIN_MM.x + offset.x,
-    y: A4_CHEQUE_ORIGIN_MM.y + offset.y,
-  };
-
-  // Light gray outline of the cheque area to help alignment on carrier sheets.
-  page.drawRectangle({
-    x: origin.x * MM_TO_PT,
-    y: page.getHeight() - (origin.y + template.heightMm) * MM_TO_PT,
-    width: template.widthMm * MM_TO_PT,
-    height: template.heightMm * MM_TO_PT,
-    borderColor: rgb(0.55, 0.6, 0.65),
-    borderWidth: 0.5,
+  return generatePdf(payload, {
+    ...DEFAULT_PRINT_LAYOUT,
+    paperPreset: "a4",
+    anchorX: "left",
+    anchorY: "top",
+    offsetMm: { x: 12, y: 12 },
   });
-
-  drawCheque(page, font, bold, courier, payload, origin);
-  return doc.save();
 }
 
 /**
  * A ruler grid at the cheque's size — print on plain paper and hold a real
- * cheque against it to measure where the fields actually sit (Calibrate, step 4).
+ * cheque against it to measure where the fields actually sit (Calibrate).
+ * Uses the same PrintLayout pipeline so test prints match real prints.
  */
-export async function generateTestGridPdf(bankId: BankId): Promise<Uint8Array> {
+export async function generateTestGridPdf(
+  bankId: BankId,
+  layout: PrintLayout = DEFAULT_PRINT_LAYOUT,
+): Promise<Uint8Array> {
   const template = BANK_TEMPLATES[bankId];
   const doc = await PDFDocument.create();
   const page = doc.addPage([
@@ -415,5 +473,6 @@ export async function generateTestGridPdf(bankId: BankId): Promise<Uint8Array> {
       page.drawText(String(y), { x: 1, y: py - 6, size: 5, font, color: ink });
     }
   }
-  return doc.save();
+  if (layout.paperPreset === "cheque") return doc.save();
+  return placeOnCarrier(doc, layout, false);
 }

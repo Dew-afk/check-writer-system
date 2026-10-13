@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { BANK_TEMPLATES, type BankId } from "@/lib/banks";
 import {
-  approxWrapText,
   fieldPositionPct,
   ptToCqw,
   resolveFieldPos,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/calibration";
 import { CROSSINGS, CROSSING_PRINT_TEXT, type Crossing } from "@/lib/chequeSchema";
 import type { CustomTextField } from "@/lib/customFields";
+import type { AmountWordsLayoutResult } from "@/lib/layoutAmountWords";
 import {
   dateToDigits,
   digitAdvanceMm,
@@ -136,6 +136,9 @@ type ChequeCanvasProps = {
   onDuplicateCustom?: (id: string) => void;
   onEditingCommit?: (id: string, text: string) => void;
   onEditingCancel?: (id: string) => void;
+  /** Per-bank override of the amount-words line width (mm). */
+  wordsMaxWidthMm?: number;
+  onWordsMaxWidthChange?: (mm: number) => void;
   // Edit-mode values and callbacks.
   dateIso?: string;
   payee?: string;
@@ -186,6 +189,8 @@ export default function ChequeCanvas({
   onDuplicateCustom,
   onEditingCommit,
   onEditingCancel,
+  wordsMaxWidthMm,
+  onWordsMaxWidthChange,
   dateIso = "",
   payee = "",
   amountText = "",
@@ -479,14 +484,62 @@ export default function ChequeCanvas({
     />
   );
 
-  const wordsLines = wordsText
-    ? approxWrapText(
-        wordsText,
-        fields.amountWords.maxWidth,
-        fields.amountWords.fontSize,
-        fields.amountWords.lines,
-      )
-    : [];
+  const [wordsLayout, setWordsLayout] = useState<AmountWordsLayoutResult | null>(
+    null,
+  );
+  const wordsWidth = wordsMaxWidthMm ?? fields.amountWords.maxWidth;
+  useEffect(() => {
+    let cancelled = false;
+    if (!wordsText) {
+      setWordsLayout(null);
+      return;
+    }
+    void (async () => {
+      // Dynamic import keeps pdf-lib out of the initial page bundle.
+      const { getHelveticaFont } = await import("@/lib/fontMetrics");
+      const { layoutAmountWords } = await import("@/lib/layoutAmountWords");
+      const font = await getHelveticaFont();
+      if (cancelled) return;
+      setWordsLayout(
+        layoutAmountWords({
+          text: wordsText,
+          font,
+          baseFontSize: fields.amountWords.fontSize,
+          maxWidthMm: wordsWidth,
+          line2MaxWidthMm: wordsWidth,
+        }),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wordsText, wordsWidth, fields.amountWords.fontSize]);
+
+  /** Right-edge handle drag: edits the per-bank line width in mm. */
+  function startWordsWidthDrag(e: React.PointerEvent) {
+    if (!moveMode || !onWordsMaxWidthChange) return;
+    e.preventDefault();
+    const rect = measureRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mmPerPxX = template.widthMm / rect.width;
+    const startX = e.clientX;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const next = wordsWidth + (ev.clientX - startX) * mmPerPxX;
+      onWordsMaxWidthChange(Math.min(200, Math.max(20, roundOffset(next))));
+    };
+    const onUp = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+  }
+
+  const wordsLines = wordsLayout?.lines ?? [];
 
   return (
     <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
@@ -744,16 +797,54 @@ export default function ChequeCanvas({
             {...removeHandlers("amountWords")}
             style={{ left: `${wordsPos.left}%`, top: `${wordsPos.top}%` }}
           >
-            {(mode === "calibrate" ? [SAMPLE.wordsLine1, SAMPLE.wordsLine2] : wordsLines).map(
-              (line, i) => (
+            {(mode === "calibrate"
+              ? [SAMPLE.wordsLine1, SAMPLE.wordsLine2]
+              : wordsLines
+            ).map((line, i) => {
+              const isSecond = i > 0;
+              const baseY = fields.amountWords.line2?.y ?? fields.amountWords.y + fields.amountWords.lineHeight;
+              const linePos = isSecond
+                ? fieldPositionPct(
+                    fields.amountWords.line2?.x ?? resolved("amountWords").x,
+                    baseY,
+                    offset,
+                    template.widthMm,
+                    template.heightMm,
+                  )
+                : wordsPos;
+              const size =
+                mode === "calibrate"
+                  ? fields.amountWords.fontSize
+                  : wordsLayout?.fontSize ?? fields.amountWords.fontSize;
+              return (
                 <p
                   key={i}
-                  className="whitespace-nowrap leading-snug text-ink"
-                  style={fieldFont(fields.amountWords.fontSize)}
+                  className="absolute whitespace-nowrap leading-snug text-ink"
+                  style={{
+                    left: `${linePos.left}%`,
+                    top: `${linePos.top}%`,
+                    ...fieldFont(size),
+                  }}
                 >
                   {line}
                 </p>
-              ),
+              );
+            })}
+            {moveMode && onWordsMaxWidthChange && selectedField === "amountWords" && (
+              <span
+                aria-label="Amount words line end"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  startWordsWidthDrag(e);
+                }}
+                className="absolute z-20 flex size-11 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center rounded-lg border-2 border-red bg-cream text-red shadow-md"
+                style={{
+                  left: `${(wordsWidth / template.widthMm) * 100}cqw`,
+                  top: 0,
+                }}
+              >
+                <GripVerticalIcon className="size-5" />
+              </span>
             )}
             {dragHandle("amountWords")}
           </div>

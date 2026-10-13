@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-import { amountToWords } from "@/lib/amountToWords";
+import { safeAmountToWords } from "@/lib/amountToWords";
 import { BANKS, BANK_TEMPLATES, copyLayoutAsCode, type BankId } from "@/lib/banks";
 import { DEFAULT_DATE_SPACING, type DateSpacing } from "@/lib/dateSpacing";
+import type { AmountWordsLayoutResult } from "@/lib/layoutAmountWords";
+import { intersectsKeepOut } from "@/lib/layoutAmountWords";
 import {
   makeCustomFieldId,
   offsetForDuplicate,
@@ -42,11 +44,15 @@ import {
   getLastBank,
   getOffset,
   getPayees,
+  getPrintLayout,
+  getWordsMaxWidth,
   importBackup,
   saveCustomFields,
   saveDateSpacing,
   saveFieldOverrides,
   savePayees,
+  savePrintLayout,
+  saveWordsMaxWidth,
   getSavedNames,
   saveSavedNames,
   setLastBank,
@@ -62,6 +68,10 @@ import PayeeManager from "@/components/PayeeManager";
 import SystemShell from "@/components/SystemShell";
 import WordingDialog from "@/components/WordingDialog";
 import { useChequeImage } from "@/hooks/useChequeImage";
+import { useDraft } from "@/components/DraftProvider";
+import PdfDialog from "@/components/PdfDialog";
+import PrintLayoutDialog from "@/components/PrintLayoutDialog";
+import { DEFAULT_PRINT_LAYOUT, type PrintLayout } from "@/lib/printLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -166,40 +176,45 @@ const MENU_BUTTON =
   "font-mono text-[11px] uppercase tracking-[0.14em]";
 
 export default function ChequeForm() {
-  const [bankId, setBankId] = useState<BankId>(BANKS[0].id);
+  const { draft, setDraft, clearDraft } = useDraft();
+  const bankId = draft.bankId;
+  const includeDate = draft.includeDate;
+  const isoDate = draft.isoDate;
+  const includePayee = draft.includePayee;
+  const payee = draft.payee;
+  const includeAmount = draft.includeAmount;
+  const amountText = draft.amountText;
+  const crossing = draft.crossing;
+  const capitalization = draft.capitalization;
+  const suffixOnly = draft.suffixOnly;
+  const omitZeroCentavos = draft.omitZeroCentavos;
+  const customFields = draft.customFields;
   // Fields start OFF — the cheque is blank until a chip is dragged onto it.
-  const [includeDate, setIncludeDate] = useState(false);
-  const [isoDate, setIsoDate] = useState(""); // "YYYY-MM-DD", filled after mount
-  const [includePayee, setIncludePayee] = useState(false);
-  const [payee, setPayee] = useState("");
   const [payees, setPayees] = useState<Payee[]>([]);
-  const [includeAmount, setIncludeAmount] = useState(false);
-  const [amountText, setAmountText] = useState("");
-  const [crossing, setCrossing] = useState<Crossing>("none");
-  const [capitalization, setCapitalization] = useState<Capitalization>("title");
-  const [suffixOnly, setSuffixOnly] = useState(true);
-  const [omitZeroCentavos, setOmitZeroCentavos] = useState(false);
 
   const [payeeManagerOpen, setPayeeManagerOpen] = useState(false);
   const [wordingOpen, setWordingOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [moveMode, setMoveMode] = useState(false);
   const [fieldOverrides, setFieldOverrides] = useState<FieldOverrides>({});
   const [selectedField, setSelectedField] = useState<FieldId | null>(null);
   const [snapOn, setSnapOn] = useState(false);
   const [dateSpacing, setDateSpacing] = useState<DateSpacing>(DEFAULT_DATE_SPACING);
   const [dateSpacingOpen, setDateSpacingOpen] = useState(false);
-  const [customFields, setCustomFields] = useState<CustomTextField[]>([]);
+  const [printLayout, setPrintLayout] = useState<PrintLayout>(DEFAULT_PRINT_LAYOUT);
+  const [printSetupOpen, setPrintSetupOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
   const [editingCustomId, setEditingCustomId] = useState<string | null>(null);
   const [placingName, setPlacingName] = useState(false);
   const [placingNamePos, setPlacingNamePos] = useState<FieldPos | null>(null);
   const [savedNames, setSavedNames] = useState<string[]>([]);
   const [clearNamesConfirm, setClearNamesConfirm] = useState(false);
+  const [wordsMaxWidth, setWordsMaxWidth] = useState<number | undefined>(undefined);
+  const [wordsLayout, setWordsLayout] = useState<AmountWordsLayoutResult | null>(null);
   const [placingField, setPlacingField] = useState<FieldId | null>(null);
   const [placingPos, setPlacingPos] = useState<FieldPos | null>(null);
   const placingFieldRef = useRef<FieldId | null>(null);
@@ -237,16 +252,21 @@ export default function ChequeForm() {
   useEffect(() => {
     setPayees(getPayees());
     const last = getLastBank();
-    if (last) setBankId(last);
-    setIsoDate(todayIso());
-    setFieldOverrides(getFieldOverrides(last ?? BANKS[0].id));
-    setDateSpacing(getDateSpacing(last ?? BANKS[0].id));
-    setCustomFields(getCustomFields(last ?? BANKS[0].id));
+    const activeBank = draft.bankId !== BANKS[0].id ? draft.bankId : (last ?? BANKS[0].id);
+    if (activeBank !== draft.bankId) {
+      setDraft({ bankId: activeBank, customFields: getCustomFields(activeBank) });
+    }
+    if (!draft.isoDate) setDraft({ isoDate: todayIso() });
+    setFieldOverrides(getFieldOverrides(activeBank));
+    setDateSpacing(getDateSpacing(activeBank));
+    setWordsMaxWidth(getWordsMaxWidth(activeBank));
+    setPrintLayout(getPrintLayout(activeBank));
     setSavedNames(getSavedNames());
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       if (savedFlashTimer.current) window.clearTimeout(savedFlashTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Derived validity.
@@ -256,11 +276,6 @@ export default function ChequeForm() {
   const dateIsValid = isoDateSchema.safeParse(isoDate).success;
   const anyFieldIncluded =
     includeDate || includePayee || includeAmount || crossing !== "none";
-  const canPrint =
-    anyFieldIncluded &&
-    (!includeDate || dateIsValid) &&
-    (!includePayee || payeeIsValid) &&
-    (!includeAmount || amountIsValid);
 
   const warnings =
     includeDate && dateIsValid ? getDateWarnings(isoDate) : [];
@@ -277,15 +292,92 @@ export default function ChequeForm() {
     : null;
   const wordingPreview =
     amountIsValid && amount !== null
-      ? amountToWords(amount, { capitalization, suffixOnly, omitZeroCentavos })
+      ? (safeAmountToWords(amount, {
+          capitalization,
+          suffixOnly,
+          omitZeroCentavos,
+        }) ?? "Invalid amount — must be at most 999,999,999.99.")
       : "Enter a valid amount to preview the wording.";
 
+  // Single source of truth: the SAME layout module the canvas and PDF use.
+  useEffect(() => {
+    let cancelled = false;
+    if (!(amountIsValid && amount !== null)) {
+      setWordsLayout(null);
+      return;
+    }
+    void (async () => {
+      const { getHelveticaFont } = await import("@/lib/fontMetrics");
+      const { layoutAmountWords } = await import("@/lib/layoutAmountWords");
+      const font = await getHelveticaFont();
+      if (cancelled) return;
+      const template = BANK_TEMPLATES[bankRef.current];
+      const width =
+        wordsMaxWidth ?? template.fields.amountWords.maxWidth;
+      setWordsLayout(
+        layoutAmountWords({
+          text: wordingPreview,
+          font,
+          baseFontSize: template.fields.amountWords.fontSize,
+          maxWidthMm: width,
+          line2MaxWidthMm: width,
+        }),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wordingPreview, wordsMaxWidth, bankId]);
+
+  const wordsOverflow = wordsLayout?.overflow ?? false;
+  const wordsLine2Overlaps =
+    !!wordsLayout?.wrapped &&
+    intersectsKeepOut(
+      {
+        x: BANK_TEMPLATES[bankId].fields.amountWords.line2?.x ??
+          BANK_TEMPLATES[bankId].fields.amountWords.x,
+        y: BANK_TEMPLATES[bankId].fields.amountWords.line2?.y ??
+          BANK_TEMPLATES[bankId].fields.amountWords.y +
+            BANK_TEMPLATES[bankId].fields.amountWords.lineHeight,
+        w: wordsMaxWidth ?? BANK_TEMPLATES[bankId].fields.amountWords.maxWidth,
+        h: BANK_TEMPLATES[bankId].fields.amountWords.fontSize * 0.45,
+      },
+      BANK_TEMPLATES[bankId].fields.amountWords.keepOut ?? [],
+    );
+
+  const canPrint =
+    !wordsOverflow &&
+    anyFieldIncluded &&
+    (!includeDate || dateIsValid) &&
+    (!includePayee || payeeIsValid) &&
+    (!includeAmount || amountIsValid);
+
+  function handleWordsWidthChange(mm: number) {
+    setWordsMaxWidth(mm);
+    if (saveWordsMaxWidth(bankId, mm)) {
+      setSaveState("saved");
+      if (savedFlashTimer.current) window.clearTimeout(savedFlashTimer.current);
+      savedFlashTimer.current = window.setTimeout(() => setSaveState("idle"), 1600);
+    } else {
+      setStorageError(true);
+    }
+  }
+
+  function handleSnapWordsToLineEnd() {
+    const width = BANK_TEMPLATES[bankId].fields.amountWords.maxWidth;
+    handleWordsWidthChange(width);
+  }
+
   function handleBankChange(next: BankId) {
-    setBankId(next);
+    saveCustomFields(bankId, customFields);
     setLastBank(next);
+    setDraft({ bankId: next, customFields: getCustomFields(next) });
     setFieldOverrides(getFieldOverrides(next));
     setDateSpacing(getDateSpacing(next));
-    setCustomFields(getCustomFields(next));
+    setWordsMaxWidth(getWordsMaxWidth(next));
+    setDraft({ customFields: getCustomFields(next) });
     setSelectedCustomId(null);
     setEditingCustomId(null);
     setSelectedField(null);
@@ -438,10 +530,10 @@ export default function ChequeForm() {
   }
 
   function updateCustom(id: string, patch: Partial<CustomTextField>) {
-    setCustomFields((prev) => {
-      const next = prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
+    setDraft((prev) => {
+      const next = prev.customFields.map((f) => (f.id === id ? { ...f, ...patch } : f));
       persistCustomFields(next);
-      return next;
+      return { customFields: next };
     });
   }
 
@@ -457,10 +549,10 @@ export default function ChequeForm() {
       uppercase: false,
       align: 'left',
     };
-    setCustomFields((prev) => {
-      const next = [...prev, instance];
+    setDraft((prev) => {
+      const next = [...prev.customFields, instance];
       persistCustomFields(next);
-      return next;
+      return { customFields: next };
     });
     setSelectedCustomId(instance.id);
     setEditingCustomId(instance.id);
@@ -535,10 +627,10 @@ export default function ChequeForm() {
   }
 
   function removeCustom(id: string) {
-    setCustomFields((prev) => {
-      const next = prev.filter((f) => f.id !== id);
+    setDraft((prev) => {
+      const next = prev.customFields.filter((f) => f.id !== id);
       persistCustomFields(next);
-      return next;
+      return { customFields: next };
     });
     if (selectedCustomId === id) setSelectedCustomId(null);
     if (editingCustomId === id) setEditingCustomId(null);
@@ -552,10 +644,10 @@ export default function ChequeForm() {
       id: makeCustomFieldId(),
       ...offsetForDuplicate({ x: source.x, y: source.y }),
     };
-    setCustomFields((prev) => {
-      const next = [...prev, copy];
+    setDraft((prev) => {
+      const next = [...prev.customFields, copy];
       persistCustomFields(next);
-      return next;
+      return { customFields: next };
     });
     setSelectedCustomId(copy.id);
   }
@@ -577,7 +669,7 @@ export default function ChequeForm() {
   }
 
   function clearAllNames() {
-    setCustomFields([]);
+    setDraft({ customFields: [] });
     customFieldsRef.current = [];
     setSelectedCustomId(null);
     setEditingCustomId(null);
@@ -692,11 +784,11 @@ export default function ChequeForm() {
       return;
     }
     handleFieldMoved(field, pos);
-    if (field === "date") setIncludeDate(true);
-    else if (field === "payee") setIncludePayee(true);
-    else if (field === "amountNum") setIncludeAmount(true);
+    if (field === "date") setDraft({ includeDate: true });
+    else if (field === "payee") setDraft({ includePayee: true });
+    else if (field === "amountNum") setDraft({ includeAmount: true });
     else if (field === "crossing" && crossing === "none")
-      setCrossing("account-payee-only");
+      setDraft({ crossing: "account-payee-only" });
     setSelectedField(field);
     placementCancel();
   }
@@ -711,10 +803,10 @@ export default function ChequeForm() {
     if (!clearFieldOverrideSingle(bankId, fieldId)) {
       setStorageError(true);
     }
-    if (fieldId === "date") setIncludeDate(false);
-    else if (fieldId === "payee") setIncludePayee(false);
-    else if (fieldId === "amountNum") setIncludeAmount(false);
-    else if (fieldId === "crossing") setCrossing("none");
+    if (fieldId === "date") setDraft({ includeDate: false });
+    else if (fieldId === "payee") setDraft({ includePayee: false });
+    else if (fieldId === "amountNum") setDraft({ includeAmount: false });
+    else if (fieldId === "crossing") setDraft({ crossing: "none" });
     if (selectedField === fieldId) setSelectedField(null);
   }
 
@@ -749,7 +841,7 @@ export default function ChequeForm() {
     if (result.ok) {
       setPayees(getPayees());
       const last = getLastBank();
-      if (last) setBankId(last);
+      if (last) setDraft({ bankId: last, customFields: getCustomFields(last) });
       const noun = result.payeeCount === 1 ? "payee" : "payees";
       setImportStatus({
         ok: true,
@@ -785,40 +877,47 @@ export default function ChequeForm() {
       omitZeroCentavos,
       dateSpacing,
       customFields,
+      wordsMaxWidthMm: wordsMaxWidth,
       offset: getOffset(bankId),
       fieldOverrides,
     };
   }
 
-  type PrintMode = "pdf" | "a4" | "preview";
+  type PrintMode = "dialog" | "download";
 
   async function handlePrint(mode: PrintMode) {
     setGenerating(true);
     try {
       // Dynamic import keeps pdf-lib out of the initial page bundle.
-      const { generateChequePdf, generateChequePdfA4 } = await import(
-        "@/lib/generatePdf"
-      );
-      const payload = buildPayload();
-      const bytes =
-        mode === "a4"
-          ? await generateChequePdfA4(payload)
-          : await generateChequePdf(payload);
+      const { generatePdf } = await import("@/lib/generatePdf");
+      const bytes = await generatePdf(buildPayload(), printLayout);
       const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
-      if (mode === "preview") {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(url);
-        setPreviewOpen(true);
-      } else {
-        window.open(url, "_blank");
+      if (mode === "download") {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "cheque.pdf";
+        link.click();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+        setPdfUrl(url);
+        setPdfOpen(true);
       }
     } catch {
       setImportStatus({ ok: false, message: "PDF generation failed." });
     } finally {
       setGenerating(false);
     }
+  }
+
+  function handlePrintLayoutChange(next: PrintLayout) {
+    setPrintLayout(next);
+    savePrintLayout(bankId, next);
+  }
+
+  function handlePrintLayoutReset() {
+    handlePrintLayoutChange(DEFAULT_PRINT_LAYOUT);
   }
 
   const menuBar = (
@@ -871,6 +970,9 @@ export default function ChequeForm() {
           <DropdownMenuItem onClick={() => setConfirmAction("all")}>
             Reset all banks…
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setPrintSetupOpen(true)}>
+            Print setup…
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setDateSpacingOpen(true)}>
             Date spacing…
           </DropdownMenuItem>
@@ -922,21 +1024,21 @@ export default function ChequeForm() {
         <DropdownMenuContent align="end">
           <DropdownMenuItem
             disabled={!canPrint || generating}
-            onClick={() => void handlePrint("pdf")}
+            onClick={() => void handlePrint("dialog")}
           >
-            Print Cheque (PDF)
+            Print…
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!canPrint || generating}
-            onClick={() => void handlePrint("preview")}
+            onClick={() => void handlePrint("dialog")}
           >
-            Print Preview
+            Preview
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!canPrint || generating}
-            onClick={() => void handlePrint("a4")}
+            onClick={() => void handlePrint("download")}
           >
-            Print on A4 at offset
+            Download PDF
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1043,7 +1145,7 @@ export default function ChequeForm() {
               onPlacementDrop={placementDrop}
               onPlacementStep={placementStep}
               onPlacementCancel={placementCancel}
-              onToggle={() => setIncludeDate((v) => !v)}
+              onToggle={() => setDraft({ includeDate: !includeDate })}
             />
             <FieldChip
               label="Payee"
@@ -1054,7 +1156,7 @@ export default function ChequeForm() {
               onPlacementDrop={placementDrop}
               onPlacementStep={placementStep}
               onPlacementCancel={placementCancel}
-              onToggle={() => setIncludePayee((v) => !v)}
+              onToggle={() => setDraft({ includePayee: !includePayee })}
             />
             <FieldChip
               label="Amount"
@@ -1065,7 +1167,7 @@ export default function ChequeForm() {
               onPlacementDrop={placementDrop}
               onPlacementStep={placementStep}
               onPlacementCancel={placementCancel}
-              onToggle={() => setIncludeAmount((v) => !v)}
+              onToggle={() => setDraft({ includeAmount: !includeAmount })}
             />
             <FieldChip
               label="Crossing"
@@ -1077,7 +1179,7 @@ export default function ChequeForm() {
               onPlacementStep={placementStep}
               onPlacementCancel={placementCancel}
               onToggle={() =>
-                setCrossing(crossing === "none" ? "account-payee-only" : "none")
+                setDraft({ crossing: crossing === "none" ? "account-payee-only" : "none" })
               }
             />
             <FieldChip
@@ -1125,7 +1227,7 @@ export default function ChequeForm() {
             <Label className="label-micro text-ink-muted">Crossing</Label>
             <Select
               value={crossing}
-              onValueChange={(value) => setCrossing(value as Crossing)}
+              onValueChange={(value) => setDraft({ crossing: value as Crossing })}
             >
               <SelectTrigger className="h-11 w-56 rounded-xl px-5 data-[size=default]:h-11" aria-label="Crossing">
                 <SelectValue />
@@ -1199,6 +1301,16 @@ export default function ChequeForm() {
                   aria-label={`${selectedField} Y position in mm`}
                 />
               </div>
+              {selectedField === "amountWords" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-xl px-5"
+                  onClick={handleSnapWordsToLineEnd}
+                >
+                  Snap to line end
+                </Button>
+              )}
               <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-muted">
                 Arrow keys 1 mm · Shift 5 mm
               </span>
@@ -1353,6 +1465,8 @@ export default function ChequeForm() {
             onDuplicateCustom={duplicateCustom}
             onEditingCommit={commitCustomEditing}
             onEditingCancel={cancelCustomEditing}
+            wordsMaxWidthMm={wordsMaxWidth}
+            onWordsMaxWidthChange={handleWordsWidthChange}
             dateIso={isoDate}
             payee={payee}
             amountText={amountText}
@@ -1360,10 +1474,10 @@ export default function ChequeForm() {
             includeDate={includeDate}
             includePayee={includePayee}
             includeAmount={includeAmount}
-            onDateChange={setIsoDate}
-            onPayeeChange={setPayee}
-            onAmountChange={setAmountText}
-            onCrossingChange={setCrossing}
+            onDateChange={(v) => setDraft({ isoDate: v })}
+            onPayeeChange={(v) => setDraft({ payee: v })}
+            onAmountChange={(v) => setDraft({ amountText: v })}
+            onCrossingChange={(v) => setDraft({ crossing: v })}
             payees={payees}
             wordsText={amountIsValid && amount !== null ? wordingPreview : undefined}
           />
@@ -1384,8 +1498,25 @@ export default function ChequeForm() {
             key={wordingPreview}
             className="animate-in fade-in duration-300 mt-1 text-sm leading-relaxed text-ink"
           >
-            {wordingPreview}
+            {wordsLayout?.lines.join(" ") ?? wordingPreview}
           </p>
+          {wordsLayout?.wrapped && (
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-muted">
+              Two lines — drag the line-end handle on the cheque to widen it,
+              or snap to the pre-printed line.
+            </p>
+          )}
+          {wordsLine2Overlaps && (
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-amber-700">
+              Line 2 overlaps pre-printed text or the bank logo.
+            </p>
+          )}
+          {wordsOverflow && (
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-destructive">
+              Amount words don&apos;t fit the line — shorten the amount or
+              widen the line before printing.
+            </p>
+          )}
           {amountText !== "" && amount === null && (
             <p className="mt-1 text-xs text-destructive">
               Enter a valid amount — up to 999,999,999.99, at most 2 decimals.
@@ -1408,10 +1539,20 @@ export default function ChequeForm() {
           </div>
         )}
 
-        <NoticeBanner className="mt-4">
-          Print at 100% / Actual Size, margins None. Test on plain paper
-          first. Use only on your own genuine cheque stock.
-        </NoticeBanner>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <NoticeBanner>
+            Print at 100% / Actual Size, margins None. Test on plain paper
+            first. Use only on your own genuine cheque stock.
+          </NoticeBanner>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11 rounded-xl px-5 font-mono text-[11px] uppercase tracking-[0.12em] text-destructive"
+            onClick={clearDraft}
+          >
+            Clear form
+          </Button>
+        </div>
       </SystemShell>
 
       <PayeeManager
@@ -1434,11 +1575,11 @@ export default function ChequeForm() {
         onOpenChange={setWordingOpen}
         amountText={amountText}
         capitalization={capitalization}
-        onCapitalizationChange={setCapitalization}
+        onCapitalizationChange={(v) => setDraft({ capitalization: v as Capitalization })}
         suffixOnly={suffixOnly}
-        onSuffixOnlyChange={setSuffixOnly}
+        onSuffixOnlyChange={(v) => setDraft({ suffixOnly: v })}
         omitZeroCentavos={omitZeroCentavos}
-        onOmitZeroCentavosChange={setOmitZeroCentavos}
+        onOmitZeroCentavosChange={(v) => setDraft({ omitZeroCentavos: v })}
       />
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
@@ -1523,47 +1664,28 @@ export default function ChequeForm() {
         }}
       />
 
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="flex h-[80vh] max-w-2xl flex-col sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Print Preview</DialogTitle>
-            <DialogDescription>
-              Use your browser&apos;s print (Ctrl+P) at 100% scale, margins
-              None. Test on plain paper first.
-            </DialogDescription>
-          </DialogHeader>
-          {previewUrl ? (
-            <iframe
-              src={previewUrl}
-              title="Cheque print preview"
-              className="min-h-0 flex-1 rounded-md border border-border bg-white"
-            />
-          ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              Generating preview…
-            </div>
-          )}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (previewUrl) window.open(previewUrl, "_blank");
-              }}
-            >
-              Open in new tab
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => setPreviewOpen(false)}
-            >
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <PdfDialog
+        open={pdfOpen}
+        onOpenChange={setPdfOpen}
+        url={pdfUrl}
+        title="Print Preview"
+        description="Print at 100% / Actual Size, margins None. Test on plain paper first."
+        onDownload={() => {
+          if (!pdfUrl) return;
+          const link = document.createElement("a");
+          link.href = pdfUrl;
+          link.download = "cheque.pdf";
+          link.click();
+        }}
+      />
+
+      <PrintLayoutDialog
+        open={printSetupOpen}
+        onOpenChange={setPrintSetupOpen}
+        layout={printLayout}
+        onChange={handlePrintLayoutChange}
+        onReset={handlePrintLayoutReset}
+      />
     </>
   );
 }

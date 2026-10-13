@@ -1,6 +1,6 @@
 "use client";
 
-import { amountToWords } from "@/lib/amountToWords";
+import { safeAmountToWords } from "@/lib/amountToWords";
 import {
   CAPITALIZATIONS,
   parseAmountText,
@@ -50,9 +50,10 @@ export default function WordingDialog({
 }: WordingDialogProps) {
   const amount = parseAmountText(amountText);
   const preview =
-    amount !== null
-      ? amountToWords(amount, { capitalization, suffixOnly, omitZeroCentavos })
-      : "Enter a valid amount to preview the wording.";
+    amount === null
+      ? "Enter a valid amount to preview the wording."
+      : (safeAmountToWords(amount, { capitalization, suffixOnly, omitZeroCentavos }) ??
+        "Invalid amount — must be at most 999,999,999.99 with 2 decimals.");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
