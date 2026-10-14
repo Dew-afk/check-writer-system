@@ -46,12 +46,13 @@ anytime.
 3. **Amount-words line width**: measure the FULL pre-printed line — from the
    left edge of the words area to the line's right end (often just before
    the amount box) — not just the width of any sample text printed on it.
-   That full width is the template's `amountWords.maxWidth`. Also note the
-   position/width of a second line if the words area has one (`line2`), and
-   the rectangles of any pre-printed text/logos the words must avoid
-   (`keepOut`). On the cheque you can also drag the line-end handle of the
-   amount-words box or use **Snap to line end** — the width persists per
-   bank.
+   That full width is the template's `amountWords.maxWidth`; wrapped text
+   stacks a second line ABOVE the pre-printed line (spacing and shrink are
+   computed in `lib/layoutAmountWords.ts`, the single source for screen,
+   preview, and PDF). Also note the rectangles of any pre-printed
+   text/logos the words must avoid (`keepOut`). On the cheque you can also
+   drag the line-end handle of the amount-words box or use **Snap to line
+   end** — the width persists per bank.
 
 ## 3. Update the template
 

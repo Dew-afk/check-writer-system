@@ -15,6 +15,7 @@ import {
 import { CROSSINGS, CROSSING_PRINT_TEXT, type Crossing } from "@/lib/chequeSchema";
 import type { CustomTextField } from "@/lib/customFields";
 import type { AmountWordsLayoutResult } from "@/lib/layoutAmountWords";
+import { wordsLineSpacingMm } from "@/lib/layoutAmountWords";
 import {
   dateToDigits,
   digitAdvanceMm,
@@ -506,7 +507,6 @@ export default function ChequeCanvas({
           font,
           baseFontSize: fields.amountWords.fontSize,
           maxWidthMm: wordsWidth,
-          line2MaxWidthMm: wordsWidth,
         }),
       );
     })();
@@ -527,7 +527,8 @@ export default function ChequeCanvas({
     el.setPointerCapture(e.pointerId);
     const onMove = (ev: PointerEvent) => {
       const next = wordsWidth + (ev.clientX - startX) * mmPerPxX;
-      onWordsMaxWidthChange(Math.min(200, Math.max(20, roundOffset(next))));
+      const maxW = template.widthMm - fields.amountWords.x;
+      onWordsMaxWidthChange(Math.min(maxW, Math.max(20, roundOffset(next))));
     };
     const onUp = () => {
       el.removeEventListener("pointermove", onMove);
@@ -786,40 +787,41 @@ export default function ChequeCanvas({
 
         {/* Amount words (sample in calibrate mode, live wording in edit mode) */}
         {(mode === "calibrate" || wordsLines.length > 0) && (
-          <div
-            className={cn(
-              "absolute",
-              moveMode && dragClass,
-              selectedClass("amountWords"),
-            )}
-            {...dragHandlers("amountWords")}
-            {...selectHandlers("amountWords")}
-            {...removeHandlers("amountWords")}
-            style={{ left: `${wordsPos.left}%`, top: `${wordsPos.top}%` }}
-          >
+          <>
             {(mode === "calibrate"
               ? [SAMPLE.wordsLine1, SAMPLE.wordsLine2]
               : wordsLines
             ).map((line, i) => {
-              const isSecond = i > 0;
-              const baseY = fields.amountWords.line2?.y ?? fields.amountWords.y + fields.amountWords.lineHeight;
-              const linePos = isSecond
-                ? fieldPositionPct(
-                    fields.amountWords.line2?.x ?? resolved("amountWords").x,
-                    baseY,
-                    offset,
-                    template.widthMm,
-                    template.heightMm,
-                  )
-                : wordsPos;
               const size =
                 mode === "calibrate"
                   ? fields.amountWords.fontSize
                   : wordsLayout?.fontSize ?? fields.amountWords.fontSize;
+              // Each line is positioned in mm relative to the CANVAS (never
+              // inside a zero-size wrapper — percentages there collapse to
+              // the same point and the lines overlap). The lib's offsets
+              // stack the lines upward from the pre-printed line.
+              const offsetsMm =
+                mode === "calibrate"
+                  ? [-wordsLineSpacingMm(size), 0]
+                  : wordsLayout?.lineOffsetsMm ?? [];
+              const linePos = fieldPositionPct(
+                resolved("amountWords").x,
+                resolved("amountWords").y + (offsetsMm[i] ?? 0),
+                offset,
+                template.widthMm,
+                template.heightMm,
+              );
               return (
                 <p
                   key={i}
-                  className="absolute whitespace-nowrap leading-snug text-ink"
+                  className={cn(
+                    "absolute whitespace-nowrap leading-snug text-ink",
+                    moveMode && dragClass,
+                    selectedClass("amountWords"),
+                  )}
+                  {...dragHandlers("amountWords")}
+                  {...selectHandlers("amountWords")}
+                  {...removeHandlers("amountWords")}
                   style={{
                     left: `${linePos.left}%`,
                     top: `${linePos.top}%`,
@@ -827,6 +829,7 @@ export default function ChequeCanvas({
                   }}
                 >
                   {line}
+                  {i === 0 && dragHandle("amountWords")}
                 </p>
               );
             })}
@@ -839,15 +842,14 @@ export default function ChequeCanvas({
                 }}
                 className="absolute z-20 flex size-11 -translate-x-1/2 cursor-ew-resize touch-none items-center justify-center rounded-lg border-2 border-red bg-cream text-red shadow-md"
                 style={{
-                  left: `${(wordsWidth / template.widthMm) * 100}cqw`,
-                  top: 0,
+                  left: `${((resolved("amountWords").x + wordsWidth) / template.widthMm) * 100}%`,
+                  top: `${wordsPos.top}%`,
                 }}
               >
                 <GripVerticalIcon className="size-5" />
               </span>
             )}
-            {dragHandle("amountWords")}
-          </div>
+          </>
         )}
 
         {/* Crossing */}

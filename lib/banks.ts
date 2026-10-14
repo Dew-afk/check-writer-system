@@ -70,12 +70,11 @@ export interface BankFieldAmountWords {
   x: number;
   y: number;
   fontSize: number;
-  /** Real pre-printed line width in mm (measured from the bank's scan). */
+  /**
+   * Real pre-printed line width in mm (measured from the bank's scan): the
+   * line's right end minus the field's x. Second lines reuse this width.
+   */
   maxWidth: number;
-  lines: number;
-  lineHeight: number; // mm between lines
-  /** Where a second line starts and how wide it may be. */
-  line2?: { x: number; y: number; maxWidth: number };
   /** Rectangles (mm, top-left) of pre-printed text/logos to avoid. */
   keepOut?: KeepOutRect[];
 }
@@ -114,9 +113,6 @@ amountWords: {
         y: 44,
         fontSize: 9.5,
         maxWidth: 170,
-        lines: 2,
-        lineHeight: 4,
-        line2: { x: 20, y: 48.0, maxWidth: 170 },
         keepOut: [],
       },
   crossing: { x: 120, y: 38, width: 62, rotate: 20, fontSize: 7 },
@@ -138,11 +134,10 @@ export const BANK_TEMPLATES: Record<BankId, BankTemplate> = {
 amountWords: {
         x: 38,
         y: 32.5,
-        fontSize: 12,
-        maxWidth: 130,
-        lines: 2,
-        lineHeight: 8,
-        line2: { x: 38, y: 40.5, maxWidth: 130 },
+        // 9.5pt so even the largest wording shrinks ≤15% and still fits the
+        // real line (ends at x≈200.7mm) — 12pt would need ~198mm at 85%.
+        fontSize: 9.5,
+        maxWidth: 162.7,
         keepOut: [{"x":2,"y":26,"w":36,"h":12},{"x":2,"y":0,"w":120,"h":22}],
       },
       crossing: { x: 102, y: 32.5, width: 55, rotate: 15, fontSize: 7 },
@@ -162,10 +157,7 @@ amountWords: {
         x: 8,
         y: 35.5,
         fontSize: 12,
-        maxWidth: 160,
-        lines: 2,
-        lineHeight: 8,
-        line2: { x: 8, y: 43.5, maxWidth: 160 },
+        maxWidth: 185,
         keepOut: [{"x":2,"y":0,"w":100,"h":20},{"x":6,"y":33,"w":30,"h":10}],
       },
       crossing: { x: 100, y: 40, width: 55, rotate: 15, fontSize: 7 },
@@ -187,10 +179,7 @@ amountWords: {
         x: 12.5,
         y: 35,
         fontSize: 12,
-        maxWidth: 150,
-        lines: 2,
-        lineHeight: 8,
-        line2: { x: 12.5, y: 43.0, maxWidth: 150 },
+        maxWidth: 185,
         keepOut: [{"x":2,"y":0,"w":110,"h":20},{"x":10,"y":32,"w":26,"h":10}],
       },
       crossing: { x: 99, y: 37, width: 55, rotate: 15, fontSize: 7 },
@@ -211,10 +200,7 @@ amountWords: {
         x: 38.5,
         y: 35,
         fontSize: 12,
-        maxWidth: 150,
-        lines: 2,
-        lineHeight: 8,
-        line2: { x: 38.5, y: 43.0, maxWidth: 150 },
+        maxWidth: 162,
         keepOut: [{"x":2,"y":0,"w":90,"h":20},{"x":2,"y":33,"w":30,"h":10}],
       },
       crossing: { x: 99, y: 35, width: 55, rotate: 15, fontSize: 7 },
@@ -238,10 +224,7 @@ amountWords: {
         x: 18,
         y: 38.7,
         fontSize: 15,
-        maxWidth: 145,
-        lines: 2,
-        lineHeight: 11,
-        line2: { x: 18, y: 49.7, maxWidth: 145 },
+        maxWidth: 170.9,
         keepOut: [{"x":0,"y":36,"w":14,"h":10},{"x":2,"y":0,"w":90,"h":18}],
       },
       crossing: { x: 115, y: 28, width: 55, rotate: 15, fontSize: 7 },
@@ -286,8 +269,7 @@ export function copyLayoutAsCode(
         y: ${one(w.y)},
         fontSize: ${one(w.fontSize)},
         maxWidth: ${one(w.maxWidth)},
-        lines: ${w.lines},
-        lineHeight: ${one(w.lineHeight)},
+        keepOut: ${JSON.stringify(w.keepOut ?? [])},
       },
       crossing: { x: ${one(c.x)}, y: ${one(c.y)}, width: ${one(c.width)}, rotate: ${one(c.rotate)}, fontSize: ${one(c.fontSize)} },
     },

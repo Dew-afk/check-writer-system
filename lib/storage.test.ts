@@ -5,9 +5,12 @@ import {
   clearAllFieldOverrides,
   clearFieldOverrides,
   getFieldOverrides,
+  getOffset,
+  getWordsMaxWidth,
   loadStoredState,
   parseBackupJson,
   saveFieldOverrides,
+  saveWordsMaxWidth,
   setFieldOverride,
 } from './storage';
 
@@ -269,5 +272,51 @@ describe('field layout persistence (localStorage mock)', () => {
       fieldOverrides: {},
     });
     expect(parseBackupJson(json).ok).toBe(false);
+  });
+
+  it('resets invalid saved offsets to the clamped ±10mm range', () => {
+    globalThis.localStorage?.setItem(
+      'ph-cheque-writer:v1',
+      JSON.stringify({
+        payees: [],
+        lastBank: null,
+        offsets: { aub: { x: 999, y: -50 }, bdo: { x: 1.5, y: -2 } },
+      }),
+    );
+    // Bad values fall back to the clamped range instead of shifting the
+    // fields off the cheque.
+    expect(getOffset('aub')).toEqual({ x: 10, y: -10 });
+    expect(getOffset('bdo')).toEqual({ x: 1.5, y: -2 });
+  });
+
+  it('resets invalid saved words widths to the factory default', () => {
+    globalThis.localStorage?.setItem(
+      'ph-cheque-writer:v1',
+      JSON.stringify({
+        payees: [],
+        lastBank: null,
+        offsets: {},
+        wordsWidthOverrides: {
+          aub: 190, // past the cheque to the right of x=38 (max 165.2)
+          pnb: 'banana',
+          landbank: 5,
+          metrobank: 140, // valid
+        },
+      }),
+    );
+    expect(getWordsMaxWidth('aub')).toBeUndefined();
+    expect(getWordsMaxWidth('pnb')).toBeUndefined();
+    expect(getWordsMaxWidth('landbank')).toBeUndefined();
+    expect(getWordsMaxWidth('metrobank')).toBe(140);
+  });
+
+  it('clamps saved words widths to the bank line bounds', () => {
+    // aub words.x = 38 → max width 165.2.
+    expect(saveWordsMaxWidth('aub', 999)).toBe(true);
+    expect(getWordsMaxWidth('aub')).toBeCloseTo(203.2 - 38, 5);
+    expect(saveWordsMaxWidth('aub', 3)).toBe(true);
+    expect(getWordsMaxWidth('aub')).toBe(20);
+    expect(saveWordsMaxWidth('aub', 130)).toBe(true);
+    expect(getWordsMaxWidth('aub')).toBe(130);
   });
 });

@@ -276,20 +276,15 @@ function drawCheque(
       baseFontSize: fields.amountWords.fontSize,
       maxWidthMm:
         payload.wordsMaxWidthMm ?? fields.amountWords.maxWidth,
-      line2MaxWidthMm:
-        payload.wordsMaxWidthMm ?? fields.amountWords.line2?.maxWidth,
     });
     layout.lines.forEach((line, i) => {
-      const target = i === 0 ? wordsPos : {
-        x: fields.amountWords.line2?.x ?? wordsPos.x,
-        y: fields.amountWords.line2?.y ?? wordsPos.y + fields.amountWords.lineHeight,
-      };
+      // Lines stack upward from the pre-printed line (lineOffsetsMm).
       drawText({
         page,
         font,
         text: line,
-        xMm: target.x,
-        yMm: target.y,
+        xMm: wordsPos.x,
+        yMm: wordsPos.y + layout.lineOffsetsMm[i],
         fontSize: layout.fontSize,
         originMm,
         pageHeightPt,

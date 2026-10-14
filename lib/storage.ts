@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   cleanFieldOverrides,
+  sanitizeOffset,
   type FieldId,
   type FieldOverrides,
 } from './calibration';
@@ -112,6 +113,17 @@ const storedStateSchema = z.object({
           });
         }
       }
+    })
+    .transform((offsets) => {
+      // Out-of-range saved offsets (bad layout data) fall back to the
+      // clamped ±10mm range instead of shifting fields off the cheque.
+      const out: Partial<Record<BankId, Offset>> = {};
+      for (const [key, value] of Object.entries(offsets)) {
+        if (bankIdSchema.safeParse(key).success) {
+          out[key as BankId] = sanitizeOffset(value);
+        }
+      }
+      return out;
     }),
   fieldOverrides: fieldOverridesSchema,
   dateSpacing: z
@@ -147,7 +159,12 @@ const storedStateSchema = z.object({
       for (const [bankKey, value] of Object.entries(raw)) {
         if (!bankIdSchema.safeParse(bankKey).success) continue;
         if (typeof value !== "number" || !Number.isFinite(value)) continue;
-        if (value < 20 || value > 203.2) continue;
+        // Must leave room on the cheque to the right of the field's x;
+        // anything beyond that (or below 20mm) is an invalid saved layout
+        // and falls back to the bank's factory line length.
+        const bank = BANK_TEMPLATES[bankKey as BankId];
+        const max = CHEQUE_WIDTH_MM - bank.fields.amountWords.x;
+        if (value < 20 || value > max) continue;
         out[bankKey as BankId] = Math.round(value * 10) / 10;
       }
       return out;
@@ -371,7 +388,8 @@ export function getWordsMaxWidth(bankId: BankId): number | undefined {
 
 export function saveWordsMaxWidth(bankId: BankId, mm: number): boolean {
   const state = loadStoredState();
-  const clamped = Math.min(203.2, Math.max(20, Math.round(mm * 10) / 10));
+  const max = CHEQUE_WIDTH_MM - BANK_TEMPLATES[bankId].fields.amountWords.x;
+  const clamped = Math.min(max, Math.max(20, Math.round(mm * 10) / 10));
   return saveStoredState({
     ...state,
     wordsWidthOverrides: { ...state.wordsWidthOverrides, [bankId]: clamped },

@@ -12,12 +12,19 @@ import type { PDFFont } from "pdf-lib";
  *   3. Only then wrap at word boundaries into at most 2 lines, keeping the
  *      trailing "and NN/100 Only" as one unbreakable unit and preferring a
  *      balanced break. If it still doesn't fit → overflow: true.
+ *
+ * Line placement: lines stack UPWARD from the pre-printed line, so the
+ * first rendered line is the topmost one and the last line sits on the
+ * pre-printed line itself. `lineOffsetsMm[i]` is the Y offset (mm, positive
+ * = down) of line i relative to the field's anchor position — renderers add
+ * it to the field's Y instead of computing their own line positions.
  */
 
 const MIN_FONT_PT = 8;
 export const WORDS_MIN_FONT_RATIO = 0.85;
 
 const PT_PER_MM = 72 / 25.4;
+const MM_PER_PT = 25.4 / 72;
 
 export interface AmountWordsLayoutInput {
   text: string;
@@ -38,6 +45,17 @@ export interface AmountWordsLayoutResult {
   overflow: boolean;
   /** True when the text wrapped to a second line. */
   wrapped: boolean;
+  /**
+   * Y offset of each line in mm, relative to the field's anchor (positive =
+   * down). One line → [0]. Two lines → [-spacing, 0]: the first line goes
+   * ABOVE the pre-printed line, the last line sits ON it.
+   */
+  lineOffsetsMm: number[];
+}
+
+/** Distance between stacked lines (mm) for the given font size. */
+export function wordsLineSpacingMm(fontSizePt: number): number {
+  return Math.round(fontSizePt * 1.2 * MM_PER_PT * 100) / 100;
 }
 
 /** The trailing fraction ("and 50/100 Only") as one unbreakable unit. */
@@ -68,7 +86,13 @@ export function layoutAmountWords(
   }
   fontSize = Math.round(fontSize * 100) / 100;
   if (widthMm(text, font, fontSize) <= maxWidthMm) {
-    return { lines: [text], fontSize, overflow: false, wrapped: false };
+    return {
+      lines: [text],
+      fontSize,
+      overflow: false,
+      wrapped: false,
+      lineOffsetsMm: [0],
+    };
   }
 
   // 3: wrap into at most 2 lines. Keep "and NN/100 Only" unbreakable.
@@ -111,11 +135,18 @@ export function layoutAmountWords(
     widthMm(lines[0] ?? "", font, fontSize) > maxWidthMm ||
     (lines.length > 1 &&
       widthMm(lines[1], font, fontSize) > maxWidth2);
+  const wrapped = lines.length > 1;
+  const spacing = wordsLineSpacingMm(fontSize);
+  // Stack upward from the pre-printed line: the first (topmost) line is
+  // offset upward, the last line sits exactly on the anchor.
+  const lineOffsetsMm =
+    lines.length <= 1 ? [0] : [-spacing, 0];
   return {
     lines: lines.slice(0, 2),
     fontSize,
     overflow,
-    wrapped: lines.length > 1,
+    wrapped,
+    lineOffsetsMm,
   };
 }
 

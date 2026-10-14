@@ -320,7 +320,6 @@ export default function ChequeForm() {
           font,
           baseFontSize: template.fields.amountWords.fontSize,
           maxWidthMm: width,
-          line2MaxWidthMm: width,
         }),
       );
     })();
@@ -332,19 +331,19 @@ export default function ChequeForm() {
   }, [wordingPreview, wordsMaxWidth, bankId]);
 
   const wordsOverflow = wordsLayout?.overflow ?? false;
+  const wordsField = BANK_TEMPLATES[bankId].fields.amountWords;
+  // The wrapped text's top line (stacked upward from the pre-printed line)
+  // is the one that can run into pre-printed text or logos above it.
   const wordsLine2Overlaps =
     !!wordsLayout?.wrapped &&
     intersectsKeepOut(
       {
-        x: BANK_TEMPLATES[bankId].fields.amountWords.line2?.x ??
-          BANK_TEMPLATES[bankId].fields.amountWords.x,
-        y: BANK_TEMPLATES[bankId].fields.amountWords.line2?.y ??
-          BANK_TEMPLATES[bankId].fields.amountWords.y +
-            BANK_TEMPLATES[bankId].fields.amountWords.lineHeight,
-        w: wordsMaxWidth ?? BANK_TEMPLATES[bankId].fields.amountWords.maxWidth,
-        h: BANK_TEMPLATES[bankId].fields.amountWords.fontSize * 0.45,
+        x: wordsField.x,
+        y: wordsField.y + (wordsLayout.lineOffsetsMm[0] ?? 0),
+        w: wordsMaxWidth ?? wordsField.maxWidth,
+        h: ((wordsLayout?.fontSize ?? wordsField.fontSize) * 1.2 * 25.4) / 72,
       },
-      BANK_TEMPLATES[bankId].fields.amountWords.keepOut ?? [],
+      wordsField.keepOut ?? [],
     );
 
   const canPrint =

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { amountToWords } from "./amountToWords";
 import { BANK_TEMPLATES, type BankId } from "./banks";
 import { getHelveticaFont } from "./fontMetrics";
 import {
   intersectsKeepOut,
   layoutAmountWords,
+  wordsLineSpacingMm,
 } from "./layoutAmountWords";
 
 const AUB_SAMPLE =
@@ -20,7 +22,6 @@ async function layoutFor(bankId: BankId, text: string) {
     font,
     baseFontSize: words.fontSize,
     maxWidthMm: words.maxWidth,
-    line2MaxWidthMm: words.line2?.maxWidth,
   });
 }
 
@@ -100,6 +101,53 @@ describe("layoutAmountWords — one line whenever the real line allows", () => {
     expect(layout.lines.length).toBeLessThanOrEqual(2);
   });
 
+  it("fits 123,123,121.00 on AUB on one line", async () => {
+    const text = amountToWords(123123121, {
+      capitalization: "title",
+      suffixOnly: true,
+    });
+    const layout = await layoutFor("aub", text);
+    expect(layout.lines, JSON.stringify(layout)).toHaveLength(1);
+    expect(layout.overflow).toBe(false);
+    // The shrink cap still applies — never more than 15% off the base.
+    const base = BANK_TEMPLATES.aub.fields.amountWords.fontSize;
+    expect(layout.fontSize).toBeGreaterThanOrEqual(base * 0.85 - 0.01);
+  });
+
+  it("a forced wrap gives 2 lines at different Y positions", async () => {
+    const font = await getHelveticaFont();
+    const layout = layoutAmountWords({
+      text: LONGEST,
+      font,
+      baseFontSize: 12,
+      maxWidthMm: 100,
+    });
+    expect(layout.wrapped).toBe(true);
+    expect(layout.lines).toHaveLength(2);
+    expect(layout.lineOffsetsMm).toHaveLength(2);
+    expect(layout.lineOffsetsMm[0]).not.toBe(layout.lineOffsetsMm[1]);
+    // The last line sits exactly on the pre-printed line; the first line
+    // stacks upward from it.
+    expect(layout.lineOffsetsMm[1]).toBe(0);
+    expect(layout.lineOffsetsMm[0]).toBeLessThan(0);
+    expect(layout.lineOffsetsMm[0]).toBeCloseTo(
+      -wordsLineSpacingMm(layout.fontSize),
+      5,
+    );
+  });
+
+  it("a one-line layout anchors the line at offset 0", async () => {
+    const font = await getHelveticaFont();
+    const layout = layoutAmountWords({
+      text: AUB_SAMPLE,
+      font,
+      baseFontSize: 12,
+      maxWidthMm: 200,
+    });
+    expect(layout.lines).toHaveLength(1);
+    expect(layout.lineOffsetsMm).toEqual([0]);
+  });
+
   it("parity: the same input yields identical lines at any call", async () => {
     const font = await getHelveticaFont();
     const words = BANK_TEMPLATES.aub.fields.amountWords;
@@ -108,17 +156,16 @@ describe("layoutAmountWords — one line whenever the real line allows", () => {
       font,
       baseFontSize: words.fontSize,
       maxWidthMm: words.maxWidth,
-      line2MaxWidthMm: words.line2?.maxWidth,
     });
     const b = layoutAmountWords({
       text: AUB_SAMPLE,
       font,
       baseFontSize: words.fontSize,
       maxWidthMm: words.maxWidth,
-      line2MaxWidthMm: words.line2?.maxWidth,
     });
     expect(a.lines).toEqual(b.lines);
     expect(a.fontSize).toBe(b.fontSize);
+    expect(a.lineOffsetsMm).toEqual(b.lineOffsetsMm);
   });
 });
 
