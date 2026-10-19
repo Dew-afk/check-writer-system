@@ -140,6 +140,12 @@ type ChequeCanvasProps = {
   /** Per-bank override of the amount-words line width (mm). */
   wordsMaxWidthMm?: number;
   onWordsMaxWidthChange?: (mm: number) => void;
+  /**
+   * GUIDE LAYER toggle: when false, the cheque scan, border outline, and
+   * placeholder watermark are hidden and only the print fields remain on a
+   * plain white canvas. Screen-only — never affects the PDF.
+   */
+  showBorderOnScreen?: boolean;
   // Edit-mode values and callbacks.
   dateIso?: string;
   payee?: string;
@@ -192,6 +198,7 @@ export default function ChequeCanvas({
   onEditingCancel,
   wordsMaxWidthMm,
   onWordsMaxWidthChange,
+  showBorderOnScreen = true,
   dateIso = "",
   payee = "",
   amountText = "",
@@ -548,7 +555,10 @@ export default function ChequeCanvas({
         <div
           ref={measureRef}
           className={cn(
-            "relative overflow-hidden rounded-lg border border-line bg-white shadow-sm",
+            // NOTE: no border on this container — the guide outline is an
+            // overlay below, so toggling it never changes the box size and
+            // mm positions stay pixel-identical.
+            "relative overflow-hidden rounded-lg bg-white shadow-sm",
             placing && "ring-4 ring-red/50",
           )}
           style={{ aspectRatio: `${template.widthMm} / ${template.heightMm}` }}
@@ -556,7 +566,13 @@ export default function ChequeCanvas({
             if (moveMode && onSelectField) onSelectField(null);
           }}
         >
-        {imageUrl && imageIsFlatScan ? (
+        {showBorderOnScreen && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-0 rounded-lg border border-line"
+          />
+        )}
+        {imageUrl && imageIsFlatScan && showBorderOnScreen ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imageUrl}
@@ -565,13 +581,20 @@ export default function ChequeCanvas({
             draggable={false}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-paper/40">
-            <span className="select-none text-2xl font-bold tracking-widest text-ink/10">
-              {template.name.toUpperCase()}
-            </span>
+          <div
+            className={cn(
+              "absolute inset-0 flex items-center justify-center",
+              showBorderOnScreen ? "bg-paper/40" : "bg-white",
+            )}
+          >
+            {showBorderOnScreen && (
+              <span className="select-none text-2xl font-bold tracking-widest text-ink/10">
+                {template.name.toUpperCase()}
+              </span>
+            )}
           </div>
         )}
-        {imageUrl && !imageIsFlatScan && (
+        {imageUrl && !imageIsFlatScan && showBorderOnScreen && (
           <figure className="absolute bottom-[2%] right-[2%] z-10 w-[24%] overflow-hidden rounded-lg border border-line bg-white shadow-sm">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img

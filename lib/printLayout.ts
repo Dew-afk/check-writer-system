@@ -35,6 +35,13 @@ export interface PrintLayout {
   anchorY: AnchorY;
   /** Fine offset in mm, applied after the anchor grid. */
   offsetMm: { x: number; y: number };
+  /**
+   * Draws the cheque-area outline onto CARRIER papers (a guide for
+   * aligning pre-printed stock). Default OFF: real prints are fields only,
+   * and the cheque-size preset never draws it (it would print on the stock
+   * itself). Existing saved layouts without this key migrate to OFF.
+   */
+  printChequeBorder?: boolean;
 }
 
 export const DEFAULT_PRINT_LAYOUT: PrintLayout = {
@@ -44,6 +51,7 @@ export const DEFAULT_PRINT_LAYOUT: PrintLayout = {
   anchorX: "center",
   anchorY: "middle",
   offsetMm: { x: 0, y: 0 },
+  printChequeBorder: false,
 };
 
 export const PAPER_PRESET_LABELS: Record<PaperPreset, string> = {
@@ -93,6 +101,9 @@ export function sanitizePrintLayout(value: unknown): PrintLayout | null {
     anchorX,
     anchorY,
     offsetMm: { x: 0, y: 0 },
+    // Migration: saved layouts from before this option existed have no key
+    // and must default to OFF — borders/backgrounds never print by default.
+    printChequeBorder: v.printChequeBorder === true,
   };
   if (v.paperPreset === "custom") {
     const w = v.customWidthMm;

@@ -20,8 +20,14 @@ pre-printed bank stock expects them.
 - **Print setup** — paper presets (A4, Letter, Legal, Folio, A5, cheque
   size, custom), portrait/landscape, content rotation for how your printer
   feeds, and a 3×3 anchor grid with fine offsets — saved per bank
+- **Screen guides, never printed** — the cheque scan and border outline are
+  editing guides on screen only. Print Setup has a **Print cheque border**
+  toggle (OFF by default) for a carrier-sheet outline, and **Show border on
+  screen** (ON by default) to preview exactly what prints: black fields on
+  white. The preview dialog states what will actually print.
 - **Printer calibration** — X/Y offsets and a mm ruler grid that uses the
-  same print layout as real prints
+  same print layout as real prints (the grid prints only from Calibrate's
+  "Print test", never on real cheques)
 - **Per-bank layouts** in millimetres that survive reloads, plus a JSON
   backup
 
@@ -30,6 +36,10 @@ pre-printed bank stock expects them.
 - Print at **100% / Actual Size**, margins **None**. Test on plain paper first.
 - Use only on **your own genuine cheque stock**. The app never prints or
   stores account numbers or MICR data.
+- **Only your typed fields print on the stock.** The cheque scan, border
+  outline, and guides stay on screen; the mm ruler grid prints only when
+  you choose "Print test" on the Calibrate page. The optional carrier
+  border (Print Setup → Print cheque border) is OFF by default.
 - Everything runs in the browser — there is no backend and your data
   (payees, layouts, cheque images) never leaves this device. Clearing site
   data erases it, so use **File → Export data** for backups.

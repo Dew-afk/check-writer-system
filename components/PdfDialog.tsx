@@ -17,6 +17,8 @@ type PdfDialogProps = {
   url: string | null;
   title: string;
   description?: string;
+  /** "What will actually print" indicator (print-layer note). */
+  note?: string;
   /** Downloads the PDF instead of opening a tab (optional). */
   onDownload?: () => void;
 };
@@ -32,6 +34,7 @@ export default function PdfDialog({
   url,
   title,
   description,
+  note,
   onDownload,
 }: PdfDialogProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -62,6 +65,11 @@ export default function PdfDialog({
             <DialogDescription>
               {description} Print at 100% / Actual Size, margins None.
             </DialogDescription>
+          )}
+          {note && (
+            <p className="rounded-lg border border-teal/40 bg-teal/10 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-teal">
+              {note}
+            </p>
           )}
         </DialogHeader>
         {url ? (

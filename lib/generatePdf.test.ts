@@ -1,4 +1,5 @@
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { inflateSync } from "node:zlib";
+import { PDFArray, PDFDocument, PDFName, PDFRawStream, StandardFonts } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 
 import { BANK_TEMPLATES } from "./banks";
@@ -241,6 +242,19 @@ describe("unified PrintLayout pipeline (Fix 2)", () => {
         customHeightMm: 120,
       }),
     ).toMatchObject({ paperPreset: "custom", customWidthMm: 300, customHeightMm: 120 });
+    // printChequeBorder: saved layouts without the key migrate to OFF;
+    // only an explicit true turns it on.
+    expect(
+      sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT })!.printChequeBorder,
+    ).toBe(false);
+    expect(
+      sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT, printChequeBorder: true })!
+        .printChequeBorder,
+    ).toBe(true);
+    expect(
+      sanitizePrintLayout({ ...DEFAULT_PRINT_LAYOUT, printChequeBorder: "yes" })!
+        .printChequeBorder,
+    ).toBe(false);
   });
 
   it("test grids are valid for every bank/paper/orientation", async () => {
@@ -256,5 +270,156 @@ describe("unified PrintLayout pipeline (Fix 2)", () => {
         }
       }
     }
+  });
+});
+
+describe("print layer separation — border/background never print by default", () => {
+  // pdf-lib compresses every content stream, so operators are extracted by
+  // inflating each stream object of the saved PDF. Border/box drawing uses
+  // paths closed with `h` (drawRectangle); fields only use text (Tm/Tj)
+  // and the crossing's open `m`/`l` strokes — never `h`. Text is written
+  // as hex strings, so field presence is checked via hex-encoded text.
+  const TM_RE =
+    /-?[\d.]+ -?[\d.]+ -?[\d.]+ -?[\d.]+ -?[\d.]+ -?[\d.]+ Tm/g;
+
+  function decodeStream(stream: PDFRawStream): string | null {
+    try {
+      const filter = stream.dict.get(PDFName.of("Filter"));
+      const name = String(
+        filter instanceof PDFName
+          ? filter
+          : filter instanceof PDFArray
+            ? filter.get(0)
+            : "",
+      );
+      const bytes = stream.getContents();
+      return new TextDecoder().decode(
+        name.includes("Flate")
+          ? inflateSync(Buffer.from(bytes))
+          : bytes,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** All decoded content streams of a saved PDF, joined. */
+  async function allContentText(bytes: Uint8Array): Promise<{
+    text: string;
+    imageStreams: number;
+  }> {
+    const doc = await PDFDocument.load(bytes);
+    const parts: string[] = [];
+    let imageStreams = 0;
+    for (const [ref] of doc.context.enumerateIndirectObjects()) {
+      const obj = doc.context.lookup(ref);
+      if (!(obj instanceof PDFRawStream)) continue;
+      const subtype = obj.dict.get(PDFName.of("Subtype"));
+      if (String(subtype).includes("Image")) imageStreams++;
+      const decoded = decodeStream(obj);
+      if (decoded) parts.push(decoded);
+    }
+    return { text: parts.join("\n"), imageStreams };
+  }
+
+  function hex(s: string): string {
+    return `<${Buffer.from(s, "latin1").toString("hex").toUpperCase()}>`;
+  }
+
+  it("toggle OFF: no border/background drawing operations, fields present", async () => {
+    for (const paperPreset of ["a4", "letter", "legal", "folio", "a5"] as const) {
+      const bytes = await generatePdf(fullPayload, {
+        ...DEFAULT_PRINT_LAYOUT,
+        paperPreset,
+      });
+      const { text, imageStreams } = await allContentText(bytes);
+      // No closed path (border/box), no embedded image (scan/background).
+      expect(text).not.toMatch(/\bh\b/);
+      expect(imageStreams).toBe(0);
+      // The typed fields ARE there (black text on white).
+      expect(text).toContain(hex("Juan Dela Cruz"));
+    }
+  });
+
+  it("toggle ON: exactly one guide rectangle, the size of the cheque placement", async () => {
+    const layout: PrintLayout = {
+      ...DEFAULT_PRINT_LAYOUT,
+      paperPreset: "a4",
+      printChequeBorder: true,
+    };
+    const bytes = await generatePdf(fullPayload, layout);
+    const { text } = await allContentText(bytes);
+    const closes = text.match(/\bh\b/g) ?? [];
+    expect(closes).toHaveLength(1);
+    // The border path is drawn at the placement's local origin and closed
+    // with `h` — its extents must match the cheque's placed footprint.
+    const path = text.match(
+      /0 0 m\n([\d.]+) ([\d.]+) l\n([\d.]+) ([\d.]+) l\n([\d.]+) ([\d.]+) l\nh/,
+    );
+    if (!path) throw new Error("border path not found");
+    const [, , y1, x2, , x3, y3] = path.map(Number.parseFloat);
+    const paper = paperPageMm(layout);
+    const placed = placeChequeOnPage(layout, paper);
+    expect(x2).toBeCloseTo(placed.widthMm * MM_TO_PT, 2);
+    expect(y1).toBeCloseTo(placed.heightMm * MM_TO_PT, 2);
+    expect(x3).toBeCloseTo(x2, 2);
+    expect(y3).toBeCloseTo(0, 2);
+  });
+
+  it("field positions are identical with the toggle ON vs OFF", async () => {
+    const off = (
+      await allContentText(
+        await generatePdf(fullPayload, {
+          ...DEFAULT_PRINT_LAYOUT,
+          paperPreset: "a4",
+        }),
+      )
+    ).text;
+    const on = (
+      await allContentText(
+        await generatePdf(fullPayload, {
+          ...DEFAULT_PRINT_LAYOUT,
+          paperPreset: "a4",
+          printChequeBorder: true,
+        }),
+      )
+    ).text;
+    // Every drawText call emits one Tm — the sequences must match exactly,
+    // so toggling the guide border cannot shift any field.
+    expect(on.match(TM_RE)).toEqual(off.match(TM_RE));
+  });
+
+  it("the cheque preset never draws a border, even with the toggle ON", async () => {
+    const bytes = await generatePdf(fullPayload, {
+      ...DEFAULT_PRINT_LAYOUT,
+      paperPreset: "cheque",
+      printChequeBorder: true,
+    });
+    const { text, imageStreams } = await allContentText(bytes);
+    expect(text).not.toMatch(/\bh\b/);
+    expect(imageStreams).toBe(0);
+    expect(text).toContain(hex("Juan Dela Cruz"));
+  });
+
+  it("normal prints never contain the calibration ruler grid", async () => {
+    // The grid draws dozens of stroked line segments + ruler labels; the
+    // normal print path draws none (only the crossing's two strokes).
+    const normal = (
+      await allContentText(
+        await generatePdf(fullPayload, { ...DEFAULT_PRINT_LAYOUT, paperPreset: "a4" }),
+      )
+    ).text;
+    const grid = (
+      await allContentText(
+        await generateTestGridPdf("aub", {
+          ...DEFAULT_PRINT_LAYOUT,
+          paperPreset: "a4",
+        }),
+      )
+    ).text;
+    const strokes = (s: string) => (s.match(/\bm\n/g) ?? []).length;
+    // The grid sheet has far more paths than a cheque print.
+    expect(strokes(grid)).toBeGreaterThan(strokes(normal) * 4);
+    expect(normal).not.toContain(hex("50"));
   });
 });

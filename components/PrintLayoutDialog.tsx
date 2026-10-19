@@ -45,6 +45,9 @@ type PrintLayoutDialogProps = {
   layout: PrintLayout;
   onChange: (next: PrintLayout) => void;
   onReset: () => void;
+  /** Screen-only guide toggle (default ON). */
+  showBorderOnScreen?: boolean;
+  onShowBorderChange?: (on: boolean) => void;
 };
 
 /**
@@ -58,6 +61,8 @@ export default function PrintLayoutDialog({
   layout,
   onChange,
   onReset,
+  showBorderOnScreen = true,
+  onShowBorderChange,
 }: PrintLayoutDialogProps) {
   const paper = paperPageMm(layout);
   const placed = placeChequeOnPage(layout, paper);
@@ -250,6 +255,73 @@ export default function PrintLayoutDialog({
                 className="h-11 w-20 rounded-xl"
                 aria-label="Anchor Y offset mm"
               />
+            </div>
+
+            {/* Guides: what prints vs what shows on screen only */}
+            <div className="space-y-2 rounded-xl border border-line bg-paper/60 p-3">
+              <p className="label-micro text-ink-muted">Guides</p>
+              <button
+                type="button"
+                aria-pressed={layout.printChequeBorder === true}
+                onClick={() =>
+                  onChange({
+                    ...layout,
+                    printChequeBorder: layout.printChequeBorder !== true,
+                  })
+                }
+                className={cn(
+                  "flex min-h-11 w-full items-center justify-between rounded-xl border px-4 text-left",
+                  layout.printChequeBorder
+                    ? "border-red bg-red text-cream"
+                    : "border-line bg-surface text-ink hover:border-red/60",
+                )}
+              >
+                <span className="font-mono text-[11px] uppercase tracking-[0.12em]">
+                  Print cheque border
+                </span>
+                <span
+                  className={cn(
+                    "font-mono text-[11px] uppercase tracking-[0.12em]",
+                    layout.printChequeBorder ? "text-cream/80" : "text-ink-muted",
+                  )}
+                >
+                  {layout.printChequeBorder ? "ON" : "OFF"}
+                </span>
+              </button>
+              <p className="text-xs text-ink-muted">
+                Draws the cheque-area outline on the carrier sheet to help
+                alignment. Never printed on the cheque itself — only your
+                typed fields ever land on the stock.
+              </p>
+              <button
+                type="button"
+                aria-pressed={showBorderOnScreen}
+                onClick={() => onShowBorderChange?.(!showBorderOnScreen)}
+                disabled={!onShowBorderChange}
+                className={cn(
+                  "flex min-h-11 w-full items-center justify-between rounded-xl border px-4 text-left",
+                  showBorderOnScreen
+                    ? "border-red bg-red text-cream"
+                    : "border-line bg-surface text-ink hover:border-red/60",
+                )}
+              >
+                <span className="font-mono text-[11px] uppercase tracking-[0.12em]">
+                  Show border on screen
+                </span>
+                <span
+                  className={cn(
+                    "font-mono text-[11px] uppercase tracking-[0.12em]",
+                    showBorderOnScreen ? "text-cream/80" : "text-ink-muted",
+                  )}
+                >
+                  {showBorderOnScreen ? "ON" : "OFF"}
+                </span>
+              </button>
+              <p className="text-xs text-ink-muted">
+                Screen-only editing guide (cheque scan + border outline).
+                Turning it off shows exactly what prints: black fields on
+                white.
+              </p>
             </div>
           </div>
 

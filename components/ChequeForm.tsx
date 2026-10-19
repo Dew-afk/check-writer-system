@@ -45,6 +45,7 @@ import {
   getOffset,
   getPayees,
   getPrintLayout,
+  getShowBorderOnScreen,
   getWordsMaxWidth,
   importBackup,
   saveCustomFields,
@@ -52,6 +53,7 @@ import {
   saveFieldOverrides,
   savePayees,
   savePrintLayout,
+  saveShowBorderOnScreen,
   saveWordsMaxWidth,
   getSavedNames,
   saveSavedNames,
@@ -205,6 +207,7 @@ export default function ChequeForm() {
   const [dateSpacingOpen, setDateSpacingOpen] = useState(false);
   const [printLayout, setPrintLayout] = useState<PrintLayout>(DEFAULT_PRINT_LAYOUT);
   const [printSetupOpen, setPrintSetupOpen] = useState(false);
+  const [showBorderOnScreen, setShowBorderOnScreen] = useState(true);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfOpen, setPdfOpen] = useState(false);
   const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
@@ -261,6 +264,7 @@ export default function ChequeForm() {
     setDateSpacing(getDateSpacing(activeBank));
     setWordsMaxWidth(getWordsMaxWidth(activeBank));
     setPrintLayout(getPrintLayout(activeBank));
+    setShowBorderOnScreen(getShowBorderOnScreen(activeBank));
     setSavedNames(getSavedNames());
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -376,6 +380,8 @@ export default function ChequeForm() {
     setFieldOverrides(getFieldOverrides(next));
     setDateSpacing(getDateSpacing(next));
     setWordsMaxWidth(getWordsMaxWidth(next));
+    setPrintLayout(getPrintLayout(next));
+    setShowBorderOnScreen(getShowBorderOnScreen(next));
     setDraft({ customFields: getCustomFields(next) });
     setSelectedCustomId(null);
     setEditingCustomId(null);
@@ -917,6 +923,13 @@ export default function ChequeForm() {
 
   function handlePrintLayoutReset() {
     handlePrintLayoutChange(DEFAULT_PRINT_LAYOUT);
+  }
+
+  function handleShowBorderChange(on: boolean) {
+    setShowBorderOnScreen(on);
+    if (!saveShowBorderOnScreen(bankId, on)) {
+      setStorageError(true);
+    }
   }
 
   const menuBar = (
@@ -1466,6 +1479,7 @@ export default function ChequeForm() {
             onEditingCancel={cancelCustomEditing}
             wordsMaxWidthMm={wordsMaxWidth}
             onWordsMaxWidthChange={handleWordsWidthChange}
+            showBorderOnScreen={showBorderOnScreen}
             dateIso={isoDate}
             payee={payee}
             amountText={amountText}
@@ -1669,6 +1683,11 @@ export default function ChequeForm() {
         url={pdfUrl}
         title="Print Preview"
         description="Print at 100% / Actual Size, margins None. Test on plain paper first."
+        note={
+          printLayout.printChequeBorder
+            ? "This PDF includes the cheque border outline — only the typed fields print on the stock."
+            : "Fields only — the cheque border and background scan never print."
+        }
         onDownload={() => {
           if (!pdfUrl) return;
           const link = document.createElement("a");
@@ -1684,6 +1703,8 @@ export default function ChequeForm() {
         layout={printLayout}
         onChange={handlePrintLayoutChange}
         onReset={handlePrintLayoutReset}
+        showBorderOnScreen={showBorderOnScreen}
+        onShowBorderChange={handleShowBorderChange}
       />
     </>
   );

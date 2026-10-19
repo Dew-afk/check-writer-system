@@ -97,7 +97,28 @@ Tools → **Print setup…** (saved per bank):
 - The **live page preview** shows the cheque rectangle, a feed-direction
   arrow, and a fit warning. Calibrate's test grid uses these same settings.
 
-## 6. Test-print-on-plain-paper workflow
+## 6. Guides: what prints vs what doesn't
+
+The cheque scan, border outline, field boxes, handles, and chips are
+**screen-only editing guides** — they are never drawn into a real cheque
+PDF. The only exception is the calibration ruler grid, which prints solely
+from Calibrate's **Print test** button.
+
+Print Setup → **Guides** has two per-bank options:
+
+- **Print cheque border** — default **OFF**. When ON, a light gray
+  cheque-area outline is drawn on carrier sheets (A4 etc.) to help align
+  pre-printed stock on plain paper. It is never drawn when the paper preset
+  is the cheque itself. Existing saved setups migrate to OFF.
+- **Show border on screen** — default **ON**. Turning it off hides the
+  scan and border on the editing canvas so you see exactly what prints:
+  black fields on white. The print preview dialog states what will actually
+  print either way.
+
+Both settings persist per bank and are included in **File → Export data**
+backups.
+
+## 7. Test-print-on-plain-paper workflow
 
 1. Print the ruler grid (plain paper) → hold your cheque over it → measure.
 2. Print a cheque payload (plain paper) → overlay it on the cheque.
@@ -105,6 +126,6 @@ Tools → **Print setup…** (saved per bank):
 4. Only then print on real cheque stock.
 
 If your printer can't feed cheque-size paper, use any carrier preset (A4 is
-the default): the cheque is drawn at your anchor with a light gray outline —
-print on plain paper, align the cheque to the outline, and run it through
-once more.
+the default): the cheque is drawn at your anchor. Turn on **Print cheque
+border** to get a light gray outline — print on plain paper, align the
+cheque to the outline, and run it through once more.

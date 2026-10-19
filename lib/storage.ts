@@ -64,6 +64,11 @@ export interface StoredState {
   wordsWidthOverrides: Partial<Record<BankId, number>>;
   /** Per-bank print layout (paper, orientation, rotation, anchor). */
   printLayouts: Partial<Record<BankId, PrintLayout>>;
+  /**
+   * Per-bank screen guide: show the cheque border/scan on the editing
+   * canvas. Default ON; never affects what prints.
+   */
+  showBorderOnScreen: Partial<Record<BankId, boolean>>;
 }
 
 const STORAGE_KEY = 'ph-cheque-writer:v1';
@@ -181,6 +186,20 @@ const storedStateSchema = z.object({
       }
       return out;
     }),
+  // Optional field: backups exported before this feature lack the key and
+  // fall back to the default (border ON screen, never printed).
+  showBorderOnScreen: z
+    .record(z.string(), z.unknown())
+    .catch({})
+    .transform((raw) => {
+      const out: Partial<Record<BankId, boolean>> = {};
+      for (const [bankKey, value] of Object.entries(raw)) {
+        if (!bankIdSchema.safeParse(bankKey).success) continue;
+        if (typeof value !== "boolean") continue;
+        out[bankKey as BankId] = value;
+      }
+      return out;
+    }),
 });
 
 /** Accepts v1 backups (without or with loose layouts) and current v2 files. */
@@ -200,6 +219,7 @@ const DEFAULT_STATE: StoredState = {
   savedNames: [],
   wordsWidthOverrides: {},
   printLayouts: {},
+  showBorderOnScreen: {},
 };
 
 function getLocalStorage(): Storage | null {
@@ -381,6 +401,19 @@ export function savePrintLayout(bankId: BankId, layout: PrintLayout): boolean {
   });
 }
 
+/** Screen guide: show the cheque border/scan on the canvas (default ON). */
+export function getShowBorderOnScreen(bankId: BankId): boolean {
+  return loadStoredState().showBorderOnScreen[bankId] ?? true;
+}
+
+export function saveShowBorderOnScreen(bankId: BankId, on: boolean): boolean {
+  const state = loadStoredState();
+  return saveStoredState({
+    ...state,
+    showBorderOnScreen: { ...state.showBorderOnScreen, [bankId]: on },
+  });
+}
+
 /** Per-bank amount-words line width override (mm), or undefined. */
 export function getWordsMaxWidth(bankId: BankId): number | undefined {
   return loadStoredState().wordsWidthOverrides[bankId];
@@ -458,8 +491,8 @@ export function parseBackupJson(text: string): BackupParseResult {
       error: 'The file is not a valid PH Cheque Writer backup.',
     };
   }
-  const { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts } = result.data;
-  return { ok: true, data: { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts } };
+  const { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts, showBorderOnScreen } = result.data;
+  return { ok: true, data: { payees, lastBank, offsets, fieldOverrides, dateSpacing, customFields, savedNames, wordsWidthOverrides, printLayouts, showBorderOnScreen } };
 }
 
 export type ImportResult =

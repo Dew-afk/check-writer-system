@@ -180,7 +180,11 @@ function drawCrossing(
   });
 }
 
-/** Draws every included field of the payload onto the given page. */
+/** Draws every included field of the payload onto the given page.
+ *  THE PRINT LAYER: only typed fields (date, payee, amount, amount in
+ *  words, crossing, custom labels) are drawn here. Guide-layer content —
+ *  cheque border, background scan, ruler grid, placeholder boxes — is
+ *  never drawn in this document. */
 function drawCheque(
   page: PDFPage,
   font: PDFFont,
@@ -349,11 +353,19 @@ async function buildChequeDocument(
   return doc;
 }
 
-/** Places an embedded cheque document on a carrier page per the layout. */
+/**
+ * Places an embedded cheque document on a carrier page per the layout.
+ *
+ * Print-layer rule: the cheque document contains ONLY the typed fields
+ * (date, payee, amount, amount in words, crossing, custom labels) — no
+ * border, scan, or guides. The optional `border` is a guide drawn on the
+ * CARRIER page (never on the cheque itself) and only when the user turns
+ * on "Print cheque border" in Print Setup (default OFF).
+ */
 async function placeOnCarrier(
   chequeDoc: PDFDocument,
   layout: PrintLayout,
-  outline = true,
+  options: { border?: boolean } = {},
 ): Promise<Uint8Array> {
   const paper = paperPageMm(layout);
   const placed = placeChequeOnPage(layout, paper);
@@ -370,8 +382,11 @@ async function placeOnCarrier(
     height: embedded.height,
     rotate: degrees(layout.contentRotation),
   });
-  if (outline) {
-    // Light gray outline of the cheque area to help alignment on carrier sheets.
+  const drawBorder =
+    options.border === true && layout.paperPreset !== "cheque";
+  if (drawBorder) {
+    // Light gray outline of the cheque area to help alignment on carrier
+    // sheets — a screen-style guide the user opted into printing.
     page.drawRectangle({
       x: placed.xMm * MM_TO_PT,
       y: paper.heightMm * MM_TO_PT - (placed.yMm + placed.heightMm) * MM_TO_PT,
@@ -395,7 +410,9 @@ export async function generatePdf(
 ): Promise<Uint8Array> {
   const chequeDoc = await buildChequeDocument(payload);
   if (layout.paperPreset === "cheque") return chequeDoc.save();
-  return placeOnCarrier(chequeDoc, layout);
+  return placeOnCarrier(chequeDoc, layout, {
+    border: layout.printChequeBorder === true,
+  });
 }
 
 /**
@@ -469,5 +486,7 @@ export async function generateTestGridPdf(
     }
   }
   if (layout.paperPreset === "cheque") return doc.save();
-  return placeOnCarrier(doc, layout, false);
+  // No guide border on the calibration sheet — the ruler grid IS the guide,
+  // and this function is only reachable from Calibrate's "Print test".
+  return placeOnCarrier(doc, layout);
 }

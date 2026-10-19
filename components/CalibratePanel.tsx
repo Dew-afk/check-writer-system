@@ -291,6 +291,7 @@ export default function CalibratePanel() {
         url={pdfUrl}
         title="Test Grid"
         description="Print on plain paper, then hold your cheque against the grid. Uses your Print Setup layout."
+        note="Calibration sheet — the mm ruler grid prints only from this button, never on real cheque prints."
         onDownload={() => {
           if (!pdfUrl) return;
           const link = document.createElement("a");

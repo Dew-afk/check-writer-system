@@ -6,10 +6,14 @@ import {
   clearFieldOverrides,
   getFieldOverrides,
   getOffset,
+  getPrintLayout,
+  getShowBorderOnScreen,
   getWordsMaxWidth,
   loadStoredState,
   parseBackupJson,
   saveFieldOverrides,
+  savePrintLayout,
+  saveShowBorderOnScreen,
   saveWordsMaxWidth,
   setFieldOverride,
 } from './storage';
@@ -32,6 +36,7 @@ describe('parseBackupJson', () => {
         savedNames: [],
         wordsWidthOverrides: {},
         printLayouts: {},
+        showBorderOnScreen: {},
       });
     }
   });
@@ -219,6 +224,7 @@ describe('field layout persistence (localStorage mock)', () => {
       savedNames: [],
       wordsWidthOverrides: {},
       printLayouts: {},
+      showBorderOnScreen: {},
     });
   });
 
@@ -318,5 +324,64 @@ describe('field layout persistence (localStorage mock)', () => {
     expect(getWordsMaxWidth('aub')).toBe(20);
     expect(saveWordsMaxWidth('aub', 130)).toBe(true);
     expect(getWordsMaxWidth('aub')).toBe(130);
+  });
+
+  it('shows the border on screen by default and persists per bank', () => {
+    expect(getShowBorderOnScreen('aub')).toBe(true);
+    expect(saveShowBorderOnScreen('aub', false)).toBe(true);
+    expect(getShowBorderOnScreen('aub')).toBe(false);
+    expect(getShowBorderOnScreen('pnb')).toBe(true);
+  });
+
+  it('migrates old saved data: borders OFF for printing, ON for the screen guide', () => {
+    // A pre-feature backup/storage blob: no printChequeBorder on the
+    // layout, no showBorderOnScreen key at all.
+    globalThis.localStorage?.setItem(
+      'ph-cheque-writer:v1',
+      JSON.stringify({
+        payees: [],
+        lastBank: null,
+        offsets: {},
+        printLayouts: {
+          aub: {
+            paperPreset: 'a4',
+            orientation: 'portrait',
+            contentRotation: 0,
+            anchorX: 'center',
+            anchorY: 'middle',
+            offsetMm: { x: 0, y: 0 },
+          },
+        },
+      }),
+    );
+    // Printing must default OFF…
+    expect(getPrintLayout('aub').printChequeBorder).toBe(false);
+    // …while the on-screen guide stays ON.
+    expect(getShowBorderOnScreen('aub')).toBe(true);
+  });
+
+  it('rejects non-boolean screen-guide values and keeps others', () => {
+    globalThis.localStorage?.setItem(
+      'ph-cheque-writer:v1',
+      JSON.stringify({
+        payees: [],
+        lastBank: null,
+        offsets: {},
+        showBorderOnScreen: { aub: false, pnb: 'yes', chase: true },
+      }),
+    );
+    expect(getShowBorderOnScreen('aub')).toBe(false);
+    expect(getShowBorderOnScreen('pnb')).toBe(true);
+    expect(getShowBorderOnScreen('landbank')).toBe(true);
+  });
+
+  it('round-trips the screen-guide setting through savePrintLayout helpers', () => {
+    expect(
+      savePrintLayout('aub', {
+        ...getPrintLayout('aub'),
+        printChequeBorder: true,
+      }),
+    ).toBe(true);
+    expect(getPrintLayout('aub').printChequeBorder).toBe(true);
   });
 });
